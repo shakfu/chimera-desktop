@@ -13,6 +13,82 @@ similar use case has a head start.
 
 ---
 
+## Why this was difficult — the honest retrospective
+
+Two red herrings to dispel first, because they came up repeatedly
+during the debugging and neither was the real cause:
+
+- **It was not about a missing `/props` endpoint.** chimera had
+  `/props` from the start. The 404s we kept seeing in devtools were
+  not chimera saying "I don't know that route" — they were the
+  *vite dev server* returning 404 because our fetches were going
+  to `http://localhost:1420/props` instead of being rewritten to
+  the chimera sidecar at `http://127.0.0.1:<port>/props`.
+- **It was not about a missing `--cors` flag in chimera.** chimera
+  does send `Access-Control-Allow-Origin` headers (verified via
+  `curl -is`). We never needed a chimera-side CORS change. The
+  webview-side blocker turned out to be something else, and the
+  fix lives entirely on the chimera-desktop side.
+
+The real cause was self-inflicted. We wrapped `globalThis.fetch` to
+redirect chimera-bound URLs to the dynamic sidecar port — a
+reasonable design on paper. But Tauri 2's IPC on macOS uses `fetch`
+internally (to `ipc://localhost/...`) to deliver `invoke()` messages
+to Rust. Our wrapper put every fetch behind `await baseReady`, a
+promise fulfilled by `invoke('sidecar_port')`. So:
+
+1. `invoke()` calls `fetch('ipc://localhost/...')` to reach Rust.
+2. The wrapper intercepts and awaits `baseReady`.
+3. `baseReady` only resolves once `invoke()` succeeds.
+4. Cycle complete — nothing makes progress.
+
+The fix was one line: make the await **conditional**. Only wait
+for URLs that would actually be rewritten to chimera. Once `ipc://`
+URLs pass through unblocked, IPC works, `baseReady` resolves, and
+every chimera-bound fetch that was queued behind it unblocks.
+
+The other three problems documented below (CORS / COEP, absolute
+URLs bypassing the rewriter, sticky "Server unavailable") all
+appeared *after* the deadlock fix and were quicker to diagnose.
+
+### Why it took hours instead of minutes
+
+The bug was easy to fix once found. Finding it was the hard part,
+because of how Tauri 2 IPC fails:
+
+- **A failed `invoke()` doesn't throw or reject — it just hangs.**
+  The Promise stays in "pending" state forever. No console error.
+  No exception bubbles up. No Rust log lines. The bug is *invisible*
+  through normal debugging tools.
+- **Every other system surfaces failures somehow** (HTTP 500,
+  exception event, error log, denied permission). Tauri IPC
+  silently goes nowhere if anything between the JS-side `invoke()`
+  and the Rust-side dispatcher is broken.
+- The only way to localize it was **progressive isolation**:
+  disable plugins → disable setup hook → replace `+layout.svelte`
+  with a stub → re-add upstream imports one by one → finally
+  re-add the chimera-desktop wrapper itself, at which point it
+  reproduced and the fault was clear.
+
+The single most useful diagnostic was scaffolding a fresh
+`npm create tauri-app` in a temp dir to confirm Tauri itself
+worked on the same machine. That single experiment narrowed the
+search from "Tauri / macOS / WebKit / network / config" to
+"something specific to our app code" and unblocked the rest of
+the bisect.
+
+### Meta-lesson
+
+When wrapping any global JS primitive in a Tauri app — `fetch`,
+`XMLHttpRequest`, `postMessage`, `localStorage`, even `Promise` —
+**assume Tauri's IPC layer uses it internally**. Never block such
+a primitive on anything that itself depends on a Rust command;
+that's a guaranteed deadlock. The Tauri 2 docs don't call this out
+because most apps don't wrap global fetch — but heavily-configured
+SvelteKit forks that need URL rewriting do.
+
+---
+
 ## 1. `globalThis.fetch` wrapping deadlocks Tauri IPC
 
 **Symptom.** Every `invoke()` call from the webview returns a

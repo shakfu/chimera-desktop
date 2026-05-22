@@ -37,6 +37,14 @@
 		Exited: 'exited'
 	};
 
+	// Adaptive poll cadence:
+	//   - Starting / unknown: 2s (waiting for the sidecar to come up)
+	//   - Running: 10s (sidecar is healthy; no need to hammer it)
+	//   - Failed / Exited: stop polling entirely (status won't change
+	//     without a restart)
+	// Implemented with setTimeout chains rather than a fixed setInterval
+	// so the rate updates between every tick. Tracked via a ref so the
+	// cleanup function can cancel the pending timer.
 	async function poll() {
 		try {
 			const s = await invoke<SidecarStatus>('sidecar_status');
@@ -47,10 +55,31 @@
 		}
 	}
 
+	function nextInterval(s: typeof status): number | null {
+		if (s === 'failed' || s === 'exited') return null;
+		if (s === 'running') return 10000;
+		return 2000;
+	}
+
 	onMount(() => {
-		const interval = setInterval(poll, 2000);
-		poll();
-		return () => clearInterval(interval);
+		let cancelled = false;
+		let timeout: ReturnType<typeof setTimeout> | null = null;
+
+		async function tick() {
+			if (cancelled) return;
+			await poll();
+			const delay = nextInterval(status);
+			if (delay !== null && !cancelled) {
+				timeout = setTimeout(tick, delay);
+			}
+		}
+
+		tick();
+
+		return () => {
+			cancelled = true;
+			if (timeout !== null) clearTimeout(timeout);
+		};
 	});
 
 	const statusLabel = $derived(
@@ -106,6 +135,7 @@
 
 	<div class="chimera-statusbar__spacer"></div>
 
+	<a class="chimera-statusbar__link" href="#/chimera/chats">chats</a>
 	<a class="chimera-statusbar__link" href="#/chimera/health">diagnostics</a>
 </footer>
 

@@ -11,66 +11,32 @@ Companion to the architecture / decisions docs:
 
 ---
 
-## P0 — quick polish (~1 hour total)
+## P1.5 — persisted-chat in-layout rail (deferred from P1)
 
-Foot-guns and cosmetic noise from the initial build-up. Cheap to fix
-and unblock daily-driver use of the app.
+The route-based chat browser at `/#/chimera/chats` shipped in the
+P0+P1 slice (read-only list, search, detail view). The remaining
+deeper integration:
 
-- [ ] **Fix orphan chimera processes on parent death.** `sidecar::kill()`
-  only runs on `WindowEvent::Destroyed`; Ctrl-C on `make run` (or any
-  hard-kill of the Tauri parent) leaves the chimera child alive. After
-  a day of dev runs you accumulate N orphans. Add a `Drop` impl on the
-  held `CommandChild` in `src-tauri/src/sidecar.rs` so it SIGKILLs on
-  drop. Also consider `signal-hook` SIGTERM/SIGINT handler on the
-  Tauri side for clean shutdown.
-
-- [ ] **Gate diagnostic logging behind `CHIMERA_DESKTOP_DEBUG=1`.**
-  The aggressive `console.warn('[chimera] ...')` lines in
-  `src/lib/chimera/sidecar.ts` and the `eprintln!('[chimera-desktop]
-  ...')` lines in `src-tauri/src/{lib,sidecar}.rs` were essential
-  during the IPC-debugging chain documented in
-  `docs/implementation.md`. Keep them — but make them conditional on
-  the env var so a clean `make run` is quiet.
-
-- [ ] **Reduce StatusBar poll rate after Running.** Currently
-  `sidecar_status` is polled every 2s indefinitely. Once status is
-  `Running`, drop to ~10s. Once it's `Failed` / `Exited`, stop
-  polling. `src/lib/chimera/components/StatusBar.svelte`.
-
----
-
-## P1 — first real feature: persisted-chat left rail
-
-The headline chimera-only differentiator per `chimera-desktop-plan.md`
-§6.5. No extra models or services needed (chimera already supports
-`--persist-chats`, which `make run` enables).
-
-- [ ] **Read-only chat list.** New `src/lib/chimera/components/ChatsRail.svelte`.
-  On mount, fetches `GET /v1/chats?limit=50`, renders a left-side
-  column with chat id, first user message preview, message count,
-  updated_at. Inject into root `+layout.svelte` to the left of
-  upstream's `Sidebar.Root` (or replace it — decide during impl).
-- [ ] **Click-to-resume.** Selecting a row fetches `GET /v1/chats/:id`
-  and rehydrates the upstream chat view's messages array. May require
-  mapping chimera's message shape to upstream's `ConversationsStore`
-  entry shape; document the mapping where it lives.
-- [ ] **FTS5 search box.** `GET /v1/chats/search?q=…&limit=20` with
-  `[word]`-highlighted snippets rendered inline. Search debounced
-  ~300ms.
-- [ ] **Verify `X-Chimera-Chat-Id` round-trip.** After sending a
-  new message, the chat should appear in the rail without page
-  reload. Re-fetch `/v1/chats` on chat-completion success, or use
-  `localStorage` event hook on `chimera.chatIds.v1`. Confirm a
-  multi-turn conversation lands in **one** chats row, not N (this
-  is exactly the §5.6 gap the X-Chimera-Chat-Id plumbing was built
-  to close).
-- [ ] **Document the pattern in `docs/implementation.md`** — adding
-  panels that consume chimera-only endpoints is a recurring shape;
-  capture it once for the right-rail wirings that follow.
-
-Acceptance: clean restart, send "hi" / "tell me a joke" / "goodbye"
-across three messages, see one chats row with three messages in the
-rail.
+- [ ] **In-layout rail.** Decision still open: a fourth column to the
+  left of upstream's sidebar vs. replacing upstream's
+  `SidebarNavigation` vs. hybrid. The route-browser version is enough
+  for "I want to see my chats" — the in-layout rail is mostly about
+  always-visible discoverability.
+- [ ] **Click-to-resume into upstream's chat view.** Currently the
+  detail view at `/#/chimera/chats/:id` is read-only. "Continue this
+  chat" needs to map chimera's `StoredMessage[]` shape to upstream's
+  `ConversationsStore` entry shape and seed the chat UI with the
+  prior turns. Non-trivial because upstream's store is IndexedDB-
+  backed and assumes its own id space.
+- [ ] **Live-update on new message.** Today the list reloads only on
+  page mount. After sending a new message in upstream's chat,
+  navigate-back-to-list shows the new chat. A `localStorage` event
+  listener on `chimera.chatIds.v1` (the X-Chimera-Chat-Id map) could
+  re-fetch in the background.
+- [ ] **Verify multi-turn consolidation.** Acceptance test from the
+  original P1: clean restart, send "hi" / "tell me a joke" /
+  "goodbye" across three messages, see **one** chats row with three
+  messages — not three rows.
 
 ---
 
@@ -232,3 +198,7 @@ don't get silently decided during impl.
 - ~~Canonicalize model path in Rust before passing to chimera; fail-loud on missing file.~~
 - ~~Makefile with `install` / `sidecar` / `dev` / `run` / `build` / `check` / `clean`.~~
 - ~~README + `docs/implementation.md` + `docs/upstream-rebase.md`.~~
+- ~~**P0.1**: orphan chimera processes fixed via `ChildGuard` Drop impl + `RunEvent::Exit` cleanup hook.~~
+- ~~**P0.2**: diagnostic logging gated behind `CHIMERA_DESKTOP_DEBUG=1` (Rust env var) and `localStorage.chimera.debug='1'` (JS); essential errors stay unconditional.~~
+- ~~**P0.3**: adaptive StatusBar poll rate — 2s while Starting / unknown, 10s while Running, stops on Failed / Exited.~~
+- ~~**P1**: persisted-chat browser at `/#/chimera/chats` with list, FTS5 search (debounced, `[word]`-highlighted snippets), and read-only detail view at `/#/chimera/chats/:id`. Status bar gets a `chats` link. "Adding a chimera-specific feature panel" pattern documented in `docs/implementation.md`.~~

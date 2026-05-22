@@ -16,10 +16,40 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
+use crate::debug;
+
+// Kill-on-drop wrapper around CommandChild. tauri-plugin-shell's
+// CommandChild does NOT kill the child on drop by default, so when the
+// Tauri parent dies via Ctrl-C / panic / SIGTERM the chimera sidecar
+// becomes an orphan. Wrapping it in ChildGuard means dropping
+// SidecarState (which happens during graceful shutdown) propagates a
+// kill. Hard kills of the parent (SIGKILL) still leak; only the OS can
+// reap those.
+pub struct ChildGuard(Option<CommandChild>);
+
+impl ChildGuard {
+    pub fn new(child: CommandChild) -> Self {
+        ChildGuard(Some(child))
+    }
+
+    pub fn into_child(mut self) -> Option<CommandChild> {
+        self.0.take()
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.take() {
+            debug!("ChildGuard dropping — killing chimera child");
+            let _ = child.kill();
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct SidecarState {
     pub port: Mutex<Option<u16>>,
-    pub child: Mutex<Option<CommandChild>>,
+    pub child: Mutex<Option<ChildGuard>>,
     pub status: Mutex<SidecarStatus>,
 }
 
@@ -67,10 +97,18 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
         )
     })?;
     let model = model_canonical.to_string_lossy().into_owned();
+    // Unconditional: a one-line confirmation the model resolved to where
+    // the user expected is high-signal for first-launch debugging and
+    // costs nothing.
     eprintln!("[chimera-desktop] resolved model path: {model}");
 
     let port = pick_free_port().map_err(|e| format!("port pick failed: {e}"))?;
 
+    // --persist-chats is load-bearing for the chimera-desktop value
+    // proposition: it tells chimera to save every chat turn to its
+    // SQLite store, which is what powers the persisted-chat browser
+    // at /#/chimera/chats. Without this flag, /v1/chats* returns 404
+    // ("chat history not enabled") and the chats panel is empty.
     let cmd = app
         .shell()
         .sidecar("chimera")
@@ -83,13 +121,14 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
             &port.to_string(),
             "-m",
             &model,
+            "--persist-chats",
         ]);
 
     let (mut rx, child) = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
 
     let state = app.state::<SidecarState>();
     *state.port.lock().unwrap() = Some(port);
-    *state.child.lock().unwrap() = Some(child);
+    *state.child.lock().unwrap() = Some(ChildGuard::new(child));
     *state.status.lock().unwrap() = SidecarStatus::Starting;
 
     let app_for_task = app.clone();
@@ -104,6 +143,9 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
                 }
                 CommandEvent::Terminated(payload) => {
                     let code = payload.code.unwrap_or(-1);
+                    // Unconditional: terminated child is always
+                    // newsworthy. The status flip is also visible in
+                    // the UI status bar.
                     eprintln!("[chimera] terminated code={code}");
                     let state = app_for_task.state::<SidecarState>();
                     *state.status.lock().unwrap() = SidecarStatus::Exited(code);
@@ -132,6 +174,8 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
         loop {
             if std::time::Instant::now() > deadline {
+                // Unconditional: a giving-up message is an error condition
+                // worth surfacing even without CHIMERA_DESKTOP_DEBUG.
                 eprintln!("[chimera-desktop] health probe gave up after 120s");
                 return;
             }
@@ -148,6 +192,9 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
                 let mut s = state.status.lock().unwrap();
                 if matches!(*s, SidecarStatus::Starting) {
                     *s = SidecarStatus::Running;
+                    // Unconditional: tells the user the sidecar is up
+                    // and what port it's on. Matched in `make run`
+                    // troubleshooting docs.
                     eprintln!("[chimera-desktop] sidecar healthy on port {port}");
                 }
                 return;
@@ -185,29 +232,29 @@ fn probe_health(port: u16) -> bool {
 }
 
 pub fn kill(app: &AppHandle) {
-    let child_opt = {
+    let guard_opt = {
         let state = app.state::<SidecarState>();
         let taken = state.child.lock().unwrap().take();
         taken
     };
-    if let Some(child) = child_opt {
-        let _ = child.kill();
+    if let Some(guard) = guard_opt {
+        if let Some(child) = guard.into_child() {
+            let _ = child.kill();
+        }
     }
 }
 
 #[tauri::command]
 pub fn sidecar_port(state: tauri::State<'_, SidecarState>) -> Option<u16> {
-    eprintln!("[chimera-desktop] sidecar_port command entered");
     let result = *state.port.lock().unwrap();
-    eprintln!("[chimera-desktop] sidecar_port returning {result:?}");
+    debug!("sidecar_port -> {result:?}");
     result
 }
 
 #[tauri::command]
 pub fn sidecar_status(state: tauri::State<'_, SidecarState>) -> SidecarStatus {
-    eprintln!("[chimera-desktop] sidecar_status command entered");
     let result = state.status.lock().unwrap().clone();
-    eprintln!("[chimera-desktop] sidecar_status returning {result:?}");
+    debug!("sidecar_status -> {result:?}");
     result
 }
 

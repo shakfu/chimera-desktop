@@ -1,21 +1,22 @@
+mod debug;
 mod sidecar;
 
 use sidecar::SidecarState;
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 
 // Minimal IPC sanity command — takes no state, returns an owned String.
-// Async to match Tauri 2's preferred command shape. If this hangs from JS
-// while the terminal shows "[chimera-desktop] ping invoked", IPC outgoing
-// works but incoming is broken. If the terminal shows nothing, the JS
-// invoke is not reaching Rust at all (likely capability gating).
+// Async to match Tauri 2's preferred command shape. Useful sanity check
+// when IPC misbehaves (see docs/implementation.md).
 #[tauri::command]
 async fn ping() -> String {
-    eprintln!("[chimera-desktop] ping invoked");
+    debug!("ping invoked");
     "pong".to_string()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    debug::init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
@@ -23,7 +24,7 @@ pub fn run() {
         .manage(SidecarState::default())
         .setup(|app| {
             let labels: Vec<String> = app.webview_windows().keys().cloned().collect();
-            eprintln!("[chimera-desktop] webview window labels: {labels:?}");
+            debug!("webview window labels: {labels:?}");
 
             let handle = app.handle().clone();
             if let Err(e) = sidecar::spawn(&handle) {
@@ -44,6 +45,20 @@ pub fn run() {
             sidecar::sidecar_status,
             sidecar::sidecar_mark_ready,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // build().run(...) lets us hook RunEvent::Exit to kill the
+        // sidecar child as a last-resort cleanup path. on_window_event
+        // covers the common case (close the window); RunEvent::Exit
+        // covers Ctrl-C / Cmd-Q / RunEvent::ExitRequested-accept paths.
+        // Combined with the ChildGuard Drop impl on SidecarState, this
+        // gives us three layers — at least one usually fires before the
+        // process truly dies. Hard SIGKILLs still leak the child; only
+        // the OS can reap those.
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if matches!(event, RunEvent::Exit) {
+                debug!("RunEvent::Exit — killing sidecar");
+                sidecar::kill(app_handle);
+            }
+        });
 }

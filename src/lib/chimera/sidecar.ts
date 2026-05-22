@@ -34,8 +34,9 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { chdbg } from './debug';
 
-console.warn('[chimera] sidecar.ts module loaded');
+chdbg('sidecar.ts module loaded');
 
 let chimeraBase: string | null = null;
 let installed = false;
@@ -249,12 +250,12 @@ async function chimeraFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 }
 
 export function installChimeraFetch(): void {
-	console.warn('[chimera] installChimeraFetch entered, already-installed=', installed);
+	chdbg('installChimeraFetch entered, already-installed=', installed);
 	if (installed) return;
 	installed = true;
 	__originalFetch = globalThis.fetch.bind(globalThis);
 	globalThis.fetch = chimeraFetch as typeof fetch;
-	console.warn('[chimera] installChimeraFetch done, fetch wrapped');
+	chdbg('installChimeraFetch done, fetch wrapped');
 }
 
 let resolveStarted = false;
@@ -262,21 +263,22 @@ let resolveStarted = false;
 export async function resolveChimeraSidecar(): Promise<void> {
 	if (resolveStarted) return;
 	resolveStarted = true;
-	console.warn('[chimera] resolveChimeraSidecar entered');
+	chdbg('resolveChimeraSidecar entered');
 	try {
-		console.warn('[chimera] about to invoke sidecar_port');
 		const port = await invoke<number | null>('sidecar_port');
-		console.warn('[chimera] sidecar_port returned', port);
 		if (port != null) {
 			chimeraBase = `http://127.0.0.1:${port}`;
-			console.warn(`[chimera] api base = ${chimeraBase}`);
+			chdbg(`api base = ${chimeraBase}`);
 		} else {
+			// Unconditional warn: chimera-bound fetches will silently fail
+			// in this state, and the user almost certainly wants to know.
 			console.warn('[chimera] sidecar_port returned null; chimera-bound fetches will fail');
 		}
 	} catch (e) {
+		// Unconditional error: same reasoning — if invoke threw, chimera
+		// is unreachable and the UI will be broken; surface the error.
 		console.error('[chimera] failed to resolve sidecar port', e);
 	} finally {
-		console.warn('[chimera] resolveBase() about to fire');
 		resolveBase();
 	}
 }

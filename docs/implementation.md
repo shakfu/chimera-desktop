@@ -136,11 +136,50 @@ error state.
 
 ## Diagnostic surface left in the code
 
-The aggressive `console.warn('[chimera] ...')` logging in
-`src/lib/chimera/sidecar.ts` and the `eprintln!('[chimera-desktop]
-...')` lines in `src-tauri/src/sidecar.rs` and `lib.rs` are
-deliberately verbose. They were essential during the debugging
-chain documented above and are cheap to keep around. If they become
-noisy, gate them behind a `CHIMERA_DESKTOP_DEBUG=1` env var rather
-than removing them outright — the next person doing this work will
-want them back.
+The verbose logging that was essential during the debugging chain
+above is gated behind a debug flag rather than removed — the next
+person doing similar work will want it back. Two switches, one per
+side of the IPC boundary:
+
+- **Rust side**: set `CHIMERA_DESKTOP_DEBUG=1` in the environment
+  before launching (e.g. `CHIMERA_DESKTOP_DEBUG=1 make run`). The
+  `src-tauri/src/debug.rs` module reads it once at startup via
+  `debug::init()` and the `debug!(...)` macro becomes a no-op when
+  unset.
+- **JS side**: in devtools console,
+  `localStorage.setItem('chimera.debug', '1')` then reload. The
+  `chdbg(...)` helper in `src/lib/chimera/debug.ts` checks the flag
+  at module load.
+
+A few eprintlns stay unconditional because they're either errors or
+high-signal first-launch confirmations: model-path resolution,
+`sidecar healthy on port N`, `terminated code=N`, the `sidecar
+spawn failed:` branch, and any unhandled invoke error.
+
+## Adding a chimera-specific feature panel
+
+The shape used for the persisted-chat browser at
+`src/routes/chimera/chats/` is the pattern for any chimera-only UI:
+
+1. **Add a route under `src/routes/chimera/<feature>/`.** Reuses
+   the root `+layout.svelte` so it inherits the chrome (right rail,
+   status bar). Don't add to upstream's `(chat)` or `settings/`
+   trees — those are vendored and meant to track upstream.
+2. **Fetch via unqualified relative paths** like
+   `fetch('/v1/chats?limit=50')`. `chimeraFetch` in
+   `src/lib/chimera/sidecar.ts` rewrites them to the sidecar's
+   `http://127.0.0.1:<port>` and routes through the Tauri HTTP
+   plugin. Never construct an absolute chimera URL by hand — it
+   ties the page to whatever port chimera picked at startup.
+3. **Pick up the link from `StatusBar.svelte`** if the feature
+   deserves a global entrypoint. Otherwise let users hit the route
+   directly via the URL bar. Same pattern as the `chats` and
+   `diagnostics` links.
+4. **Style with scoped CSS in the component**, using
+   `var(--background, …)`-style variables to pick up upstream's
+   theme tokens with graceful fallbacks for the cases where they
+   aren't defined.
+5. **No upstream files should need patches** for a sibling route
+   under `chimera/`. If you find yourself editing upstream code,
+   stop and audit whether the feature really needs to live in
+   upstream's tree or if a sibling route would do.

@@ -281,10 +281,15 @@
 				adds a right tab rail and a bottom status bar. Sidebar.Inset
 				keeps its outer class chain; the inner structure splits
 				horizontally (children + rail) on top of the status bar.
+				The children wrapper uses `overflow-auto` (not `hidden`) so
+				non-chat routes like /#/chimera/chats and /#/chimera/health
+				can scroll when their content exceeds viewport height.
+				Upstream's chat route manages its own scrolling internally
+				and is unaffected.
 			-->
 			<Sidebar.Inset class="flex flex-1 flex-col overflow-hidden">
 				<div class="flex flex-1 overflow-hidden">
-					<div class="flex flex-1 flex-col overflow-hidden">
+					<div class="flex flex-1 flex-col overflow-auto">
 						{@render children?.()}
 					</div>
 					<ChimeraRightRail />

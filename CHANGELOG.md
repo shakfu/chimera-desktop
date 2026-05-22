@@ -6,7 +6,7 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Pre-release work — the project has not yet been tagged.
+## [0.1.0]
 
 ### Added
 
@@ -127,5 +127,3 @@ Pre-release work — the project has not yet been tagged.
 - `@tauri-apps/plugin-{shell,http,opener}`: `^2`.
 - Frontend: Svelte `^5.38`, SvelteKit `^2.48`, Vite `^7.2`,
   Tailwind `^4.0`.
-
-## [0.1.0]

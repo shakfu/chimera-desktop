@@ -47,6 +47,30 @@
 
 	let persistenceDisabled = $state(false);
 
+	type DbInfo = {
+		path: string;
+		size_bytes: number;
+		row_counts: Record<string, number>;
+	};
+	let dbInfo = $state<DbInfo | null>(null);
+
+	function formatBytes(b: number): string {
+		if (b < 1024) return `${b} B`;
+		if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+		if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
+		return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
+	}
+
+	async function loadDbInfo() {
+		try {
+			const r = await fetch('/v1/chimera/db');
+			if (!r.ok) return;
+			dbInfo = (await r.json()) as DbInfo;
+		} catch {
+			/* footer is optional; ignore errors silently */
+		}
+	}
+
 	async function loadList() {
 		loading = true;
 		error = null;
@@ -118,7 +142,10 @@
 			.replace(/\[([^\]]+)\]/g, '<mark>$1</mark>');
 	}
 
-	onMount(loadList);
+	onMount(() => {
+		loadList();
+		loadDbInfo();
+	});
 </script>
 
 <svelte:head>
@@ -186,6 +213,16 @@
 				No persisted chats yet. Send a message in the chat tab and it'll appear here.
 			</p>
 		{:else}
+			{#if dbInfo}
+				<footer class="chats__db-footer">
+					<span>{formatBytes(dbInfo.size_bytes)}</span>
+					<span>·</span>
+					<span>{dbInfo.row_counts.chats ?? 0} chats</span>
+					<span>·</span>
+					<span>{dbInfo.row_counts.messages ?? 0} messages</span>
+					<span class="chats__db-footer-path" title={dbInfo.path}>{dbInfo.path}</span>
+				</footer>
+			{/if}
 			<ul class="chats__list">
 				{#each chats as chat (chat.id)}
 					<li class="chats__row">
@@ -375,5 +412,26 @@
 
 	.chats__error {
 		color: #d14a4a;
+	}
+
+	.chats__db-footer {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin: 0 0 0.75rem 0;
+		padding: 0.4rem 0.75rem;
+		font-size: 0.75rem;
+		color: var(--muted-foreground, #888);
+		background: var(--muted, #f7f7f7);
+		border-radius: 6px;
+		font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+	}
+
+	.chats__db-footer-path {
+		margin-left: auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 50%;
 	}
 </style>

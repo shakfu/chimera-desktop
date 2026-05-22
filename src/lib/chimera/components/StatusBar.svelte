@@ -136,6 +136,7 @@
 	<div class="chimera-statusbar__spacer"></div>
 
 	<a class="chimera-statusbar__link" href="#/chimera/chats">chats</a>
+	<a class="chimera-statusbar__link" href="#/chimera/about">about</a>
 	<a class="chimera-statusbar__link" href="#/chimera/health">diagnostics</a>
 </footer>
 

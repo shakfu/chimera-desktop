@@ -231,17 +231,89 @@ fn probe_health(port: u16) -> bool {
     head.starts_with("HTTP/1.1 200")
 }
 
+// Try graceful shutdown via POST /v1/chimera/shutdown first; fall back
+// to SIGKILL if the child hasn't exited within a short deadline.
+//
+// chimera's shutdown handler returns 202 immediately, then on a
+// detached thread (after ~150 ms) signals the same termination path
+// SIGINT would. We hit the endpoint, then poll for the child to exit
+// — if it doesn't within ~2.5 s, the ChildGuard's Drop / explicit
+// child.kill() takes over.
 pub fn kill(app: &AppHandle) {
-    let guard_opt = {
+    // Snapshot the port so we can POST shutdown before taking the
+    // child handle. If the port is None the child can't have a HTTP
+    // server up, so skip straight to the kill path.
+    let port_opt = {
         let state = app.state::<SidecarState>();
-        let taken = state.child.lock().unwrap().take();
-        taken
+        let port = *state.port.lock().unwrap();
+        port
     };
-    if let Some(guard) = guard_opt {
+
+    if let Some(port) = port_opt {
+        send_shutdown(port);
+        // Poll for the child to actually exit — chimera's handler
+        // is async (responds 202, terminates 150 ms later). Check
+        // for ~2.5 s before falling back to SIGKILL.
+        for _ in 0..25 {
+            if !port_listening(port) {
+                debug!("chimera exited via /v1/chimera/shutdown");
+                // Drop the ChildGuard without explicitly killing —
+                // the process is already gone. into_child() returns
+                // the CommandChild whose own Drop is a no-op.
+                let _ = take_child(app).and_then(|g| g.into_child());
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        debug!("chimera did not exit gracefully within 2.5s; SIGKILL");
+    }
+
+    if let Some(guard) = take_child(app) {
         if let Some(child) = guard.into_child() {
             let _ = child.kill();
         }
     }
+}
+
+fn take_child(app: &AppHandle) -> Option<ChildGuard> {
+    let state = app.state::<SidecarState>();
+    let taken = state.child.lock().unwrap().take();
+    taken
+}
+
+// Fire-and-forget POST /v1/chimera/shutdown. We don't need the
+// response body — we'll observe the actual exit by polling the port.
+fn send_shutdown(port: u16) {
+    use std::io::Write;
+    let addr = match format!("127.0.0.1:{port}").parse::<std::net::SocketAddr>() {
+        Ok(a) => a,
+        Err(_) => return,
+    };
+    let mut stream = match std::net::TcpStream::connect_timeout(
+        &addr,
+        std::time::Duration::from_millis(500),
+    ) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(500)));
+    let req = b"POST /v1/chimera/shutdown HTTP/1.1\r\n\
+                Host: 127.0.0.1\r\n\
+                Content-Length: 0\r\n\
+                Connection: close\r\n\r\n";
+    let _ = stream.write_all(req);
+    // Don't bother reading the response — by the time it arrives the
+    // child is on its way out and the read may race the close.
+}
+
+// True iff something is still listening on the port. chimera closes
+// its HTTP listener as part of shutdown, so this is our exit signal.
+fn port_listening(port: u16) -> bool {
+    let addr = match format!("127.0.0.1:{port}").parse::<std::net::SocketAddr>() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)).is_ok()
 }
 
 #[tauri::command]

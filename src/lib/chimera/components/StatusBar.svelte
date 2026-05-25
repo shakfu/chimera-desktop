@@ -48,8 +48,25 @@
 	async function poll() {
 		try {
 			const s = await invoke<SidecarStatus>('sidecar_status');
-			shellState.setSidecarStatus(kindToStatus[s.kind]);
+			const next = kindToStatus[s.kind];
+			const prev = shellState.sidecarStatus;
+			shellState.setSidecarStatus(next);
 			shellState.refresh();
+
+			// chimera-desktop: auto-recover the chat UI on the sidecar's
+			// not-running -> running edge. chimera binds its HTTP listener
+			// only after the model finishes loading (~10s on a cold start),
+			// so the webview's very first /props fetch races ahead of the
+			// listener, hits a refused connection, and the upstream chat UI
+			// parks on a "Server unavailable" splash. The Rust health probe
+			// only flips to Running once /health returns 200 — i.e. once the
+			// server is genuinely reachable — but nothing else re-fetches
+			// /props, so the user is left staring at the error with a green
+			// status dot. Re-issue the props fetch here (the same call the
+			// manual Retry button makes) so the UI reconnects on its own.
+			if (next === 'running' && prev !== 'running' && (!serverStore.props || serverStore.error)) {
+				void serverStore.fetch();
+			}
 		} catch {
 			/* ignore — tauri host may not be ready yet */
 		}

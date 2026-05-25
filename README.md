@@ -52,8 +52,11 @@ End-to-end working: chat against a bundled chimera sidecar, with a chimera-speci
 ## Fresh-clone quickstart
 
 ```bash
-# 1. Stage the chimera sidecar binary (assumes ~/projects/personal/chimera built).
-make sidecar
+# 1. Stage the chimera sidecar binary.
+#    Either fetch the prebuilt release (no local chimera checkout needed)...
+make sidecar-release
+#    ...or copy from a local chimera build (~/projects/personal/chimera built):
+# make sidecar
 
 # 2. Symlink a models directory so `make run` can find a default model.
 ln -s ~/projects/personal/cyllama/models models
@@ -76,6 +79,7 @@ The window opens to the vendored chat pane wrapped in the chimera-desktop chrome
 | `make install` | `npm install` |
 | `make sidecar` | copy `$CHIMERA_BUILD` (default: sibling chimera repo) into `src-tauri/binaries/chimera-<triple>` |
 | `make sidecar-from FROM=/path/to/chimera` | same, from an arbitrary path |
+| `make sidecar-release` | download + stage the prebuilt chimera `$CHIMERA_VERSION` release binary (needs `gh`; no local build) |
 | `make dev` | `npm run tauri dev` (Tauri shell + sidecar; no env-var help) |
 | `make run` | exports `CHIMERA_DESKTOP_MODEL=$(abspath $MODEL)`, then `make dev` |
 | `make vite-dev` | frontend only, no Tauri shell (fast UI iteration) |
@@ -89,11 +93,19 @@ Override variables on the command line:
 
 - `make MODEL=/abs/path/Qwen3-4B-Q8_0.gguf run` — different model for one run.
 - `make CHIMERA_BUILD=/path/to/chimera-cuda sidecar` — stage a non-default chimera build.
+- `make CHIMERA_VERSION=0.2.3 sidecar-release` — fetch a different release version.
 - `make TARGET_TRIPLE=x86_64-apple-darwin sidecar` — override the auto-detected host triple (rare; useful for cross-bundling experiments).
 
 ## Sidecar binary
 
-The chimera sidecar is **not committed** to this repo. `make sidecar` copies it from `$CHIMERA_BUILD` (default `~/projects/personal/chimera/build/chimera`) into `src-tauri/binaries/chimera-<TARGET_TRIPLE>`. Tauri's `bundle.externalBin` convention appends the host target triple to the configured base name (`binaries/chimera`), which is why the file on disk must include the suffix.
+The chimera sidecar is **not committed** to this repo. Two ways to stage it into `src-tauri/binaries/chimera-<TARGET_TRIPLE>`:
+
+- `make sidecar-release` — download the prebuilt, portable (OpenSSL-free) binary from the [chimera GitHub release](https://github.com/shakfu/chimera/releases) pinned by `CHIMERA_VERSION` (default `0.2.2`). Needs the `gh` CLI; no local chimera checkout. This is the recommended path and the one the distribution model targets.
+- `make sidecar` — copy from a local build at `$CHIMERA_BUILD` (default `~/projects/personal/chimera/build/chimera`). Use this when iterating on chimera itself.
+
+Tauri's `bundle.externalBin` convention appends the host target triple to the configured base name (`binaries/chimera`), which is why the file on disk must include the suffix.
+
+**Minimum chimera version: 0.2.1.** chimera-desktop's graceful-shutdown path POSTs to `/v1/chimera/shutdown`, which first appeared in chimera 0.2.1. Against an older sidecar that endpoint 404s and shutdown falls through to SIGKILL (functional, but ungraceful). 0.2.2 is the verified-compatible release: the spawn args (`serve --host --port -m --persist-chats`) and the `/health`, `/v1/models`, `/props`, `/v1/chats*`, and `X-Chimera-Chat-Id` chat-completion round-trip all work unchanged.
 
 Per-platform builds would stage:
 - `chimera-aarch64-apple-darwin`

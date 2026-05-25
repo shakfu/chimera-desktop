@@ -6,7 +6,7 @@
 
 .PHONY: help install dev vite-dev build tauri-build tauri-build-debug \
         check svelte-check cargo-check format \
-        sidecar sidecar-from sidecar-clean \
+        sidecar sidecar-from sidecar-release sidecar-clean \
         run \
         clean clean-deps clean-build clean-binaries \
         rebase-doc
@@ -16,6 +16,13 @@
 # Path to a chimera build to copy as the bundled sidecar. Defaults to the
 # sibling chimera repo's CPU/Metal release build.
 CHIMERA_BUILD ?= $(HOME)/projects/personal/chimera/build/chimera
+
+# chimera release to fetch with `make sidecar-release`. Pulls the prebuilt,
+# portable (OpenSSL-free) binary from the GitHub release rather than a local
+# build. Bump this when chimera cuts a new release.
+#   https://github.com/shakfu/chimera/releases
+CHIMERA_VERSION ?= 0.2.2
+CHIMERA_REPO    ?= shakfu/chimera
 
 # Host target triple (Tauri expects the bundled sidecar to be suffixed with
 # this). Resolved from rustc; override with `make TARGET_TRIPLE=...` for
@@ -38,6 +45,7 @@ help:
 	@echo "    install              npm install"
 	@echo "    sidecar              copy \$$CHIMERA_BUILD into $(BINARIES_DIR)/ with the host triple"
 	@echo "    sidecar-from FROM=…  copy from an arbitrary chimera binary path"
+	@echo "    sidecar-release      download + stage the chimera $(CHIMERA_VERSION) release binary (no local build)"
 	@echo ""
 	@echo "  development:"
 	@echo "    dev                  npm run tauri dev  (full app + sidecar)"
@@ -61,9 +69,10 @@ help:
 	@echo "    clean-binaries       rm $(BINARIES_DIR)/chimera-*"
 	@echo ""
 	@echo "  variables (override on the command line):"
-	@echo "    CHIMERA_BUILD = $(CHIMERA_BUILD)"
-	@echo "    TARGET_TRIPLE = $(TARGET_TRIPLE)"
-	@echo "    MODEL         = $(MODEL)"
+	@echo "    CHIMERA_BUILD   = $(CHIMERA_BUILD)"
+	@echo "    CHIMERA_VERSION = $(CHIMERA_VERSION)"
+	@echo "    TARGET_TRIPLE   = $(TARGET_TRIPLE)"
+	@echo "    MODEL           = $(MODEL)"
 
 # ---- Setup ----------------------------------------------------------------
 
@@ -92,6 +101,36 @@ sidecar:
 #   make sidecar-from FROM=/Users/sa/builds/chimera-cuda
 sidecar-from:
 	@$(MAKE) sidecar CHIMERA_BUILD=$(FROM)
+
+# sidecar-release: download the prebuilt chimera release binary for the host
+# triple, verify its SHA-256 against the GitHub release digest, extract, and
+# stage it. No local chimera build required. Uses `gh` for the digest-verified
+# download. Override the version with `make CHIMERA_VERSION=0.2.3 sidecar-release`.
+#
+# Asset naming maps the rustc host triple to chimera's release artifacts:
+#   aarch64-apple-darwin      -> chimera-<v>-macos-arm64.tar.gz
+#   x86_64-unknown-linux-gnu  -> chimera-<v>-linux-x86_64.tar.gz
+#   x86_64-pc-windows-msvc    -> chimera-<v>-windows-x86_64.zip   (manual; see README)
+sidecar-release:
+	@command -v gh >/dev/null 2>&1 || { echo "error: gh (GitHub CLI) is required for sidecar-release"; exit 1; }
+	@if [ -z "$(TARGET_TRIPLE)" ]; then \
+		echo "error: could not detect TARGET_TRIPLE from rustc"; exit 1; \
+	fi
+	@case "$(TARGET_TRIPLE)" in \
+		aarch64-apple-darwin)     asset="chimera-$(CHIMERA_VERSION)-macos-arm64.tar.gz" ;; \
+		x86_64-unknown-linux-gnu) asset="chimera-$(CHIMERA_VERSION)-linux-x86_64.tar.gz" ;; \
+		*) echo "error: no release asset wired for triple $(TARGET_TRIPLE)"; \
+		   echo "       (windows ships a .zip — stage it manually; see README § Sidecar binary)"; exit 1 ;; \
+	esac; \
+	tmp=$$(mktemp -d); \
+	echo "fetching $$asset from $(CHIMERA_REPO)@$(CHIMERA_VERSION) ..."; \
+	gh release download "$(CHIMERA_VERSION)" --repo "$(CHIMERA_REPO)" --pattern "$$asset" --dir "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
+	tar xzf "$$tmp/$$asset" -C "$$tmp" || { rm -rf "$$tmp"; exit 1; }; \
+	mkdir -p $(BINARIES_DIR); \
+	cp "$$tmp/chimera" "$(BINARIES_DIR)/chimera-$(TARGET_TRIPLE)"; \
+	chmod +x "$(BINARIES_DIR)/chimera-$(TARGET_TRIPLE)"; \
+	rm -rf "$$tmp"; \
+	echo "staged: $(BINARIES_DIR)/chimera-$(TARGET_TRIPLE) ($$($(BINARIES_DIR)/chimera-$(TARGET_TRIPLE) --version 2>/dev/null | head -1))"
 
 # ---- Development ----------------------------------------------------------
 

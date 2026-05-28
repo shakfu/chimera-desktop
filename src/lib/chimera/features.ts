@@ -9,9 +9,10 @@ import { invoke } from '@tauri-apps/api/core';
 export interface SidecarFeatures {
 	audio: boolean;
 	image: boolean;
+	rag: boolean;
 }
 
-const NONE: SidecarFeatures = { audio: false, image: false };
+const NONE: SidecarFeatures = { audio: false, image: false, rag: false };
 
 // Fetch the enabled modality routes. Returns everything-disabled if the
 // command is unavailable (e.g. running in a plain browser via vite-dev).

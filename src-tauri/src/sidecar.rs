@@ -67,6 +67,8 @@ pub struct SidecarFeatures {
     pub audio: bool,
     // /v1/images/generations (--enable-image).
     pub image: bool,
+    // /v1/vector_stores/* (--enable-rag).
+    pub rag: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -172,6 +174,7 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
     // an unset/bad path leaves that route off without failing the sidecar.
     //   audio  --enable-audio  -> /v1/audio/{transcriptions,translations}
     //   image  --enable-image  -> /v1/images/generations
+    //   rag    --enable-rag    -> /v1/vector_stores/*
     let mut features = SidecarFeatures::default();
     features.audio = enable_optional_model(
         &mut args,
@@ -184,6 +187,12 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
         "CHIMERA_DESKTOP_IMAGE_MODEL",
         "--enable-image",
         "image",
+    );
+    features.rag = enable_optional_model(
+        &mut args,
+        "CHIMERA_DESKTOP_RAG_MODEL",
+        "--enable-rag",
+        "rag",
     );
 
     let cmd = app

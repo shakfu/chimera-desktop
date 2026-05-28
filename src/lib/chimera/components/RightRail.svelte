@@ -9,6 +9,7 @@
 	import { sidecarFeatures, type SidecarFeatures } from '$lib/chimera/features';
 	import AudioPanel from './AudioPanel.svelte';
 	import ImagePanel from './ImagePanel.svelte';
+	import RagPanel from './RagPanel.svelte';
 
 	type TabDef = {
 		id: ChimeraPanel;
@@ -73,6 +74,7 @@
 		if (!features) return false;
 		if (id === 'audio') return features.audio;
 		if (id === 'image') return features.image;
+		if (id === 'rag') return features.rag;
 		return false;
 	}
 
@@ -126,6 +128,8 @@
 					<AudioPanel enabled={panelEnabled('audio')} />
 				{:else if activeTab.id === 'image'}
 					<ImagePanel enabled={panelEnabled('image')} />
+				{:else if activeTab.id === 'rag'}
+					<RagPanel enabled={panelEnabled('rag')} />
 				{:else}
 					<p class="text-sm text-muted-foreground">{activeTab.summary}</p>
 					<div

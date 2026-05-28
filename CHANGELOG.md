@@ -25,21 +25,31 @@ Versions track [Semantic Versioning](https://semver.org/).
   rendering of the resulting PNG(s) with a per-image download button,
   plus loading / error / not-enabled states. New
   `src/lib/chimera/image.ts` service and `ImagePanel.svelte`.
+- **RAG panel (functional vector stores).** The right-rail RAG tab is
+  wired to the sidecar's `/v1/vector_stores/*` routes: create / select /
+  delete collections, ingest text (with an optional source label) or a
+  file (multipart upload, chunked + embedded server-side), and run
+  hybrid / semantic / lexical search with a configurable top-k. Results
+  show source, score, and chunk text. New `src/lib/chimera/rag.ts`
+  service and `RagPanel.svelte`. (Collection drop uses chimera's
+  `POST /:name/delete`, not HTTP DELETE.)
 - **Optional modality routes at spawn time.** `sidecar.rs` enables
-  audio (`CHIMERA_DESKTOP_AUDIO_MODEL` → `--enable-audio`) and image
-  (`CHIMERA_DESKTOP_IMAGE_MODEL` → `--enable-image`) via a shared
-  helper: when a model env var is set and readable, the matching
-  `serve` flag is passed. Each route is optional — an unset or
-  unreadable path logs a warning and leaves that route off rather than
-  failing the sidecar. The `sidecar_features` Tauri command reports
-  which routes are live (the webview can't infer them from `/props`,
-  whose `modalities` field describes the chat model's multimodal
-  *inputs*, not the standalone audio / image routes).
-- **`AUDIO_MODEL` / `IMAGE_MODEL` make variables** (defaults
-  `models/ggml-base.en.bin` and `models/sd_xl_turbo_1.0.q8_0.gguf`),
-  passed through `make dev` as the corresponding
-  `CHIMERA_DESKTOP_*_MODEL` only when the file exists, so a missing
-  model just leaves that route disabled instead of breaking the launch.
+  audio (`CHIMERA_DESKTOP_AUDIO_MODEL` → `--enable-audio`), image
+  (`CHIMERA_DESKTOP_IMAGE_MODEL` → `--enable-image`), and RAG
+  (`CHIMERA_DESKTOP_RAG_MODEL` → `--enable-rag`) via a shared helper:
+  when a model env var is set and readable, the matching `serve` flag
+  is passed. Each route is optional — an unset or unreadable path logs
+  a warning and leaves that route off rather than failing the sidecar.
+  The `sidecar_features` Tauri command reports which routes are live
+  (the webview can't infer them from `/props`, whose `modalities`
+  field describes the chat model's multimodal *inputs*, not the
+  standalone audio / image / RAG routes).
+- **`AUDIO_MODEL` / `IMAGE_MODEL` / `RAG_MODEL` make variables**
+  (defaults `models/ggml-base.en.bin`, `models/sd_xl_turbo_1.0.q8_0.gguf`,
+  `models/bge-small-en-v1.5-q8_0.gguf`), passed through `make dev` as
+  the corresponding `CHIMERA_DESKTOP_*_MODEL` only when the file
+  exists, so a missing model just leaves that route disabled instead
+  of breaking the launch.
 
 ### Changed
 

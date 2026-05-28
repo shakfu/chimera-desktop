@@ -47,6 +47,13 @@ AUDIO_ENV := $(if $(wildcard $(AUDIO_MODEL)),CHIMERA_DESKTOP_AUDIO_MODEL=$(abspa
 IMAGE_MODEL ?= models/sd_xl_turbo_1.0.q8_0.gguf
 IMAGE_ENV := $(if $(wildcard $(IMAGE_MODEL)),CHIMERA_DESKTOP_IMAGE_MODEL=$(abspath $(IMAGE_MODEL)),)
 
+# Optional embedding model for the RAG panel (/v1/vector_stores/*). Same
+# opt-in semantics as AUDIO_MODEL / IMAGE_MODEL: passed only when the file
+# exists, so a missing model just leaves the RAG route disabled. Override
+# with `make RAG_MODEL=/abs/path dev`.
+RAG_MODEL ?= models/bge-small-en-v1.5-q8_0.gguf
+RAG_ENV := $(if $(wildcard $(RAG_MODEL)),CHIMERA_DESKTOP_RAG_MODEL=$(abspath $(RAG_MODEL)),)
+
 # Where Tauri expects the bundled sidecar binaries.
 BINARIES_DIR := src-tauri/binaries
 
@@ -89,6 +96,7 @@ help:
 	@echo "    MODEL           = $(MODEL)"
 	@echo "    AUDIO_MODEL     = $(AUDIO_MODEL)$(if $(AUDIO_ENV),, (not found; audio route disabled))"
 	@echo "    IMAGE_MODEL     = $(IMAGE_MODEL)$(if $(IMAGE_ENV),, (not found; image route disabled))"
+	@echo "    RAG_MODEL       = $(RAG_MODEL)$(if $(RAG_ENV),, (not found; rag route disabled))"
 
 # ---- Setup ----------------------------------------------------------------
 
@@ -160,7 +168,7 @@ dev:
 		echo "       create the models symlink (see README) or pass MODEL=/abs/path"; \
 		exit 1; \
 	fi
-	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) $(IMAGE_ENV) npm run tauri dev
+	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) $(IMAGE_ENV) $(RAG_ENV) npm run tauri dev
 
 vite-dev:
 	npm run dev

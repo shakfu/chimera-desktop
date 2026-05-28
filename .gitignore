@@ -47,3 +47,7 @@ src-tauri/gen/
 
 # Locally-staged sidecar binaries (will move to release artifacts later)
 src-tauri/binaries/*
+
+# agentic
+.claude
+CLAUDE.md

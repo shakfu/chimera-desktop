@@ -35,6 +35,7 @@
 	} from '$lib/stores/conversations.svelte';
 	import { config } from '$lib/stores/settings.svelte';
 	import { serverLoading, serverError, serverStore, isRouterMode } from '$lib/stores/server.svelte';
+	import { shellState } from '$lib/chimera/state.svelte'; // chimera-desktop: sidecar status for startup-aware splash
 	import { modelsStore, modelOptions, selectedModelId } from '$lib/stores/models.svelte';
 	import { isFileTypeSupported, filterFilesByModalities } from '$lib/utils';
 	import { parseFilesToMessageExtras, processFilesToChatUploaded } from '$lib/utils/browser-only';
@@ -78,6 +79,25 @@
 	let activeErrorDialog = $derived(errorDialog());
 	let isServerLoading = $derived(serverLoading());
 	let hasPropsError = $derived(!!serverError());
+
+	// chimera-desktop: distinguish "sidecar still coming up" from "sidecar is
+	// reachable but props failed". chimera binds its HTTP listener only after
+	// the model loads (~10s cold), so the first /props fetch fails fast and
+	// hasPropsError flips true while the sidecar is merely 'starting'. Showing
+	// the alarming "Server unavailable" alert during that window is wrong — the
+	// server is loading, not down. While the sidecar is starting/unknown, show
+	// the loading splash (with a startup-aware message) and suppress the error;
+	// only surface the error once the sidecar is genuinely running/failed/exited.
+	let isSidecarStartingUp = $derived(
+		shellState.sidecarStatus === 'starting' || shellState.sidecarStatus === 'unknown'
+	);
+	let showLoadingSplash = $derived(isServerLoading || (isSidecarStartingUp && hasPropsError));
+	let showPropsError = $derived(hasPropsError && !showLoadingSplash);
+	let splashMessage = $derived(
+		isSidecarStartingUp
+			? 'Starting chimera and loading the model — this can take a few seconds on first launch...'
+			: 'Initializing connection to chimera...'
+	);
 
 	let isCurrentConversationLoading = $derived(isLoading() || isChatStreaming());
 
@@ -351,8 +371,8 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if isServerLoading}
-	<ServerLoadingSplash />
+{#if showLoadingSplash}
+	<ServerLoadingSplash message={splashMessage} />
 {:else}
 	<div
 		bind:this={chatScrollContainer}
@@ -397,7 +417,7 @@
 					<ChatScreenProcessingInfo />
 				{/if}
 
-				{#if hasPropsError}
+				{#if showPropsError}
 					<div
 						class="pointer-events-auto mx-auto mb-4 max-w-[48rem] px-1"
 						use:fadeInView={{ y: 10, duration: 250 }}
@@ -422,7 +442,7 @@
 
 				<div class="conversation-chat-form pointer-events-auto rounded-t-3xl">
 					<ChatScreenForm
-						disabled={hasPropsError || isEditing()}
+						disabled={showPropsError || isEditing()}
 						{initialMessage}
 						isLoading={isCurrentConversationLoading}
 						onFileRemove={handleFileRemove}

@@ -80,8 +80,8 @@ The window opens to the vendored chat pane wrapped in the chimera-desktop chrome
 | `make sidecar` | copy `$CHIMERA_BUILD` (default: sibling chimera repo) into `src-tauri/binaries/chimera-<triple>` |
 | `make sidecar-from FROM=/path/to/chimera` | same, from an arbitrary path |
 | `make sidecar-release` | download + stage the prebuilt chimera `$CHIMERA_VERSION` release binary (needs `gh`; no local build) |
-| `make dev` | `npm run tauri dev` (Tauri shell + sidecar; no env-var help) |
-| `make run` | exports `CHIMERA_DESKTOP_MODEL=$(abspath $MODEL)`, then `make dev` |
+| `make dev` | full app: exports `CHIMERA_DESKTOP_MODEL=$(abspath $MODEL)` (verifies it exists), then `npm run tauri dev` |
+| `make run` | alias for `make dev` |
 | `make vite-dev` | frontend only, no Tauri shell (fast UI iteration) |
 | `make build` | static vite bundle to `build/` |
 | `make tauri-build` | full Tauri release bundle (slow, signed) |
@@ -100,12 +100,12 @@ Override variables on the command line:
 
 The chimera sidecar is **not committed** to this repo. Two ways to stage it into `src-tauri/binaries/chimera-<TARGET_TRIPLE>`:
 
-- `make sidecar-release` — download the prebuilt, portable (OpenSSL-free) binary from the [chimera GitHub release](https://github.com/shakfu/chimera/releases) pinned by `CHIMERA_VERSION` (default `0.2.2`). Needs the `gh` CLI; no local chimera checkout. This is the recommended path and the one the distribution model targets.
+- `make sidecar-release` — download the prebuilt, portable (OpenSSL-free) binary from the [chimera GitHub release](https://github.com/shakfu/chimera/releases) pinned by `CHIMERA_VERSION` (default `0.2.3`). Needs the `gh` CLI; no local chimera checkout. This is the recommended path and the one the distribution model targets.
 - `make sidecar` — copy from a local build at `$CHIMERA_BUILD` (default `~/projects/personal/chimera/build/chimera`). Use this when iterating on chimera itself.
 
 Tauri's `bundle.externalBin` convention appends the host target triple to the configured base name (`binaries/chimera`), which is why the file on disk must include the suffix.
 
-**Minimum chimera version: 0.2.1.** chimera-desktop's graceful-shutdown path POSTs to `/v1/chimera/shutdown`, which first appeared in chimera 0.2.1. Against an older sidecar that endpoint 404s and shutdown falls through to SIGKILL (functional, but ungraceful). 0.2.2 is the verified-compatible release: the spawn args (`serve --host --port -m --persist-chats`) and the `/health`, `/v1/models`, `/props`, `/v1/chats*`, and `X-Chimera-Chat-Id` chat-completion round-trip all work unchanged.
+**Minimum chimera version: 0.2.1.** chimera-desktop's graceful-shutdown path POSTs to `/v1/chimera/shutdown`, which first appeared in chimera 0.2.1. Against an older sidecar that endpoint 404s and shutdown falls through to SIGKILL (functional, but ungraceful). 0.2.3 is the verified-compatible release: the spawn args (`serve --host --port -m --persist-chats`) and the `/health`, `/v1/models`, `/props`, `/v1/chats*`, and `X-Chimera-Chat-Id` chat-completion round-trip all work unchanged. (0.2.3 only bumps the bundled llama.cpp / stable-diffusion.cpp engines, reworks webui embedding internals, and adds Python bindings -- no change to the HTTP API or spawn contract chimera-desktop depends on.)
 
 Per-platform builds would stage:
 - `chimera-aarch64-apple-darwin`

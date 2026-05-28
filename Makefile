@@ -21,7 +21,7 @@ CHIMERA_BUILD ?= $(HOME)/projects/personal/chimera/build/chimera
 # portable (OpenSSL-free) binary from the GitHub release rather than a local
 # build. Bump this when chimera cuts a new release.
 #   https://github.com/shakfu/chimera/releases
-CHIMERA_VERSION ?= 0.2.2
+CHIMERA_VERSION ?= 0.2.3
 CHIMERA_REPO    ?= shakfu/chimera
 
 # Host target triple (Tauri expects the bundled sidecar to be suffixed with
@@ -29,8 +29,8 @@ CHIMERA_REPO    ?= shakfu/chimera
 # cross-bundling experiments.
 TARGET_TRIPLE ?= $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 
-# Model used by `make run`. Defaults to the symlinked models/ directory
-# (see README) — override with `make MODEL=/abs/path/model.gguf run`.
+# Model used by `make dev`/`make run`. Defaults to the symlinked models/
+# directory (see README) — override with `make MODEL=/abs/path/model.gguf dev`.
 MODEL ?= models/Llama-3.2-1B-Instruct-Q8_0.gguf
 
 # Where Tauri expects the bundled sidecar binaries.
@@ -48,9 +48,9 @@ help:
 	@echo "    sidecar-release      download + stage the chimera $(CHIMERA_VERSION) release binary (no local build)"
 	@echo ""
 	@echo "  development:"
-	@echo "    dev                  npm run tauri dev  (full app + sidecar)"
+	@echo "    dev                  full app + sidecar (sets CHIMERA_DESKTOP_MODEL=\$$MODEL)"
 	@echo "    vite-dev             npm run dev        (frontend only, no Tauri shell)"
-	@echo "    run                  set CHIMERA_DESKTOP_MODEL=\$$MODEL, then dev"
+	@echo "    run                  alias for dev"
 	@echo ""
 	@echo "  build:"
 	@echo "    build                npm run build      (vite static bundle -> build/)"
@@ -134,19 +134,23 @@ sidecar-release:
 
 # ---- Development ----------------------------------------------------------
 
+# dev: launch the full app (Tauri shell + chimera sidecar). The sidecar
+# refuses to start without CHIMERA_DESKTOP_MODEL, so we set it from MODEL
+# and verify the file exists up front — otherwise the app boots to a
+# "sidecar failed / Server endpoint not found" screen with no hint why.
 dev:
-	npm run tauri dev
-
-vite-dev:
-	npm run dev
-
-run:
 	@if [ ! -e "$(MODEL)" ]; then \
 		echo "error: MODEL=$(MODEL) does not exist"; \
 		echo "       create the models symlink (see README) or pass MODEL=/abs/path"; \
 		exit 1; \
 	fi
 	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) npm run tauri dev
+
+vite-dev:
+	npm run dev
+
+# run: backward-compatible alias for dev.
+run: dev
 
 # ---- Build ----------------------------------------------------------------
 

@@ -60,11 +60,13 @@ pub struct SidecarState {
 }
 
 // Which optional chimera routes the sidecar was started with. Extend as
-// more modality panels (image, rerank, ...) get wired.
+// more modality panels (rerank, lora, ...) get wired.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct SidecarFeatures {
     // /v1/audio/transcriptions + /v1/audio/translations (--enable-audio).
     pub audio: bool,
+    // /v1/images/generations (--enable-image).
+    pub image: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -104,6 +106,31 @@ fn resolve_model_path(raw: &str) -> Result<String, String> {
     Ok(canonical.to_string_lossy().into_owned())
 }
 
+// Conditionally enable an optional modality route. When `env_var` is set to a
+// non-empty, readable model path, push `flag <path>` onto `args` and return
+// true. A bad path logs a warning and returns false rather than failing the
+// whole sidecar — a broken modality model must not take down chat. `label` is
+// used only for the log line.
+fn enable_optional_model(args: &mut Vec<String>, env_var: &str, flag: &str, label: &str) -> bool {
+    match std::env::var(env_var) {
+        Ok(raw) if !raw.trim().is_empty() => match resolve_model_path(&raw) {
+            Ok(path) => {
+                eprintln!("[chimera-desktop] {label} enabled: {path}");
+                args.push(flag.to_string());
+                args.push(path);
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[chimera-desktop] {env_var} set but unusable: {e}; {label} route disabled"
+                );
+                false
+            }
+        },
+        _ => false,
+    }
+}
+
 pub fn spawn(app: &AppHandle) -> Result<(), String> {
     let model_raw = std::env::var("CHIMERA_DESKTOP_MODEL").map_err(|_| {
         "CHIMERA_DESKTOP_MODEL is not set; export it to a .gguf path and restart".to_string()
@@ -139,31 +166,25 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
         "--persist-chats".into(),
     ];
 
-    // Optional audio transcription route. CHIMERA_DESKTOP_AUDIO_MODEL points
-    // at a whisper model (ggml/gguf); when set and readable we pass
-    // --enable-audio so chimera exposes /v1/audio/{transcriptions,translations}.
-    // Audio is optional: an unset var leaves the route off, and a set-but-
-    // unreadable path logs a warning and stays off rather than failing the
-    // whole sidecar (a broken audio path must not take down chat).
+    // Optional modality routes. Each is driven by a CHIMERA_DESKTOP_*_MODEL
+    // env var pointing at the relevant model; when set+readable we pass the
+    // matching `serve` flag so chimera mounts the route. All are optional —
+    // an unset/bad path leaves that route off without failing the sidecar.
+    //   audio  --enable-audio  -> /v1/audio/{transcriptions,translations}
+    //   image  --enable-image  -> /v1/images/generations
     let mut features = SidecarFeatures::default();
-    if let Ok(raw) = std::env::var("CHIMERA_DESKTOP_AUDIO_MODEL") {
-        if !raw.trim().is_empty() {
-            match resolve_model_path(&raw) {
-                Ok(audio_model) => {
-                    eprintln!("[chimera-desktop] audio enabled: {audio_model}");
-                    args.push("--enable-audio".into());
-                    args.push(audio_model);
-                    features.audio = true;
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[chimera-desktop] CHIMERA_DESKTOP_AUDIO_MODEL set but unusable: {e}; \
-                         audio route disabled"
-                    );
-                }
-            }
-        }
-    }
+    features.audio = enable_optional_model(
+        &mut args,
+        "CHIMERA_DESKTOP_AUDIO_MODEL",
+        "--enable-audio",
+        "audio",
+    );
+    features.image = enable_optional_model(
+        &mut args,
+        "CHIMERA_DESKTOP_IMAGE_MODEL",
+        "--enable-image",
+        "image",
+    );
 
     let cmd = app
         .shell()

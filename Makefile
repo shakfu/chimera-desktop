@@ -40,6 +40,13 @@ MODEL ?= models/Llama-3.2-1B-Instruct-Q8_0.gguf
 AUDIO_MODEL ?= models/ggml-base.en.bin
 AUDIO_ENV := $(if $(wildcard $(AUDIO_MODEL)),CHIMERA_DESKTOP_AUDIO_MODEL=$(abspath $(AUDIO_MODEL)),)
 
+# Optional stable-diffusion model for the Image panel (/v1/images/generations).
+# Same opt-in semantics as AUDIO_MODEL: passed only when the file exists, so a
+# missing model just leaves the image route disabled. Override with
+# `make IMAGE_MODEL=/abs/path dev`.
+IMAGE_MODEL ?= models/sd_xl_turbo_1.0.q8_0.gguf
+IMAGE_ENV := $(if $(wildcard $(IMAGE_MODEL)),CHIMERA_DESKTOP_IMAGE_MODEL=$(abspath $(IMAGE_MODEL)),)
+
 # Where Tauri expects the bundled sidecar binaries.
 BINARIES_DIR := src-tauri/binaries
 
@@ -81,6 +88,7 @@ help:
 	@echo "    TARGET_TRIPLE   = $(TARGET_TRIPLE)"
 	@echo "    MODEL           = $(MODEL)"
 	@echo "    AUDIO_MODEL     = $(AUDIO_MODEL)$(if $(AUDIO_ENV),, (not found; audio route disabled))"
+	@echo "    IMAGE_MODEL     = $(IMAGE_MODEL)$(if $(IMAGE_ENV),, (not found; image route disabled))"
 
 # ---- Setup ----------------------------------------------------------------
 
@@ -152,7 +160,7 @@ dev:
 		echo "       create the models symlink (see README) or pass MODEL=/abs/path"; \
 		exit 1; \
 	fi
-	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) npm run tauri dev
+	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) $(IMAGE_ENV) npm run tauri dev
 
 vite-dev:
 	npm run dev

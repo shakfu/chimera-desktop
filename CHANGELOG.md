@@ -18,19 +18,28 @@ Versions track [Semantic Versioning](https://semver.org/).
   (multipart `FormData` through `@tauri-apps/plugin-http`, bypassing
   the webview CORS/COEP). New `src/lib/chimera/audio.ts` service and
   `AudioPanel.svelte`.
-- **Optional audio route at spawn time.** `sidecar.rs` reads
-  `CHIMERA_DESKTOP_AUDIO_MODEL`; when set and readable it passes
-  `--enable-audio <whisper>` to `chimera serve` so the audio routes
-  are mounted. Audio is optional — an unset var or a bad path logs a
-  warning and leaves the route off rather than failing the sidecar.
-  A new `sidecar_features` Tauri command reports which optional
-  routes are live (the webview can't infer audio from `/props`, whose
-  `modalities` field describes the chat model's multimodal *inputs*,
-  not the standalone transcription route).
-- **`AUDIO_MODEL` make variable** (default `models/ggml-base.en.bin`),
-  passed through `make dev` as `CHIMERA_DESKTOP_AUDIO_MODEL` only when
-  the file exists, so a missing whisper model just leaves audio
-  disabled instead of breaking the launch.
+- **Image panel (functional text-to-image).** The right-rail Image
+  tab is wired to the sidecar's `/v1/images/generations` route: a
+  prompt + optional negative prompt, size / steps / CFG-scale / seed
+  controls (defaults tuned for the few-step turbo models), and inline
+  rendering of the resulting PNG(s) with a per-image download button,
+  plus loading / error / not-enabled states. New
+  `src/lib/chimera/image.ts` service and `ImagePanel.svelte`.
+- **Optional modality routes at spawn time.** `sidecar.rs` enables
+  audio (`CHIMERA_DESKTOP_AUDIO_MODEL` → `--enable-audio`) and image
+  (`CHIMERA_DESKTOP_IMAGE_MODEL` → `--enable-image`) via a shared
+  helper: when a model env var is set and readable, the matching
+  `serve` flag is passed. Each route is optional — an unset or
+  unreadable path logs a warning and leaves that route off rather than
+  failing the sidecar. The `sidecar_features` Tauri command reports
+  which routes are live (the webview can't infer them from `/props`,
+  whose `modalities` field describes the chat model's multimodal
+  *inputs*, not the standalone audio / image routes).
+- **`AUDIO_MODEL` / `IMAGE_MODEL` make variables** (defaults
+  `models/ggml-base.en.bin` and `models/sd_xl_turbo_1.0.q8_0.gguf`),
+  passed through `make dev` as the corresponding
+  `CHIMERA_DESKTOP_*_MODEL` only when the file exists, so a missing
+  model just leaves that route disabled instead of breaking the launch.
 
 ### Changed
 
@@ -50,6 +59,11 @@ Versions track [Semantic Versioning](https://semver.org/).
   `border-border`, `text-muted-foreground`, the `Button` primitive,
   …) instead of the hardcoded dark-theme hex fallbacks that clashed
   with the light theme.
+- **Capability-aware right rail.** The rail does a single
+  `sidecar_features` fetch, passes the enabled state to each panel
+  (no per-panel probing), and shows a small green dot on a tab whose
+  backing route is live. Feature detection is centralized in
+  `src/lib/chimera/features.ts`.
 
 ### Fixed
 

@@ -10,11 +10,7 @@
 // Tauri http plugin (bypassing the webview's CORS/COEP). We therefore call
 // the bare relative path here and let the wrapper do the rest.
 
-import { invoke } from '@tauri-apps/api/core';
-
-export interface SidecarFeatures {
-	audio: boolean;
-}
+import { sidecarFeatures } from './features';
 
 // Verbose-json transcription shape (a superset of the default `{ text }`).
 export interface TranscriptionResult {
@@ -33,12 +29,7 @@ export interface TranscribeOptions {
 // Whether the sidecar exposes the audio routes. Reflects the spawn-time
 // --enable-audio flag, which /props does not advertise.
 export async function audioEnabled(): Promise<boolean> {
-	try {
-		const features = await invoke<SidecarFeatures>('sidecar_features');
-		return features?.audio === true;
-	} catch {
-		return false;
-	}
+	return (await sidecarFeatures()).audio;
 }
 
 // Transcribe (or translate) an audio file. Returns the verbose-json result so

@@ -7,9 +7,11 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Label } from '$lib/components/ui/label';
-	import { audioEnabled, transcribeAudio, type TranscriptionResult } from '$lib/chimera/audio';
+	import { transcribeAudio, type TranscriptionResult } from '$lib/chimera/audio';
 
-	let enabled = $state<boolean | null>(null); // null = still probing
+	// null = still probing (owned by RightRail's one-shot feature fetch).
+	let { enabled = null }: { enabled?: boolean | null } = $props();
+
 	let files = $state<FileList | undefined>(undefined);
 	let translate = $state(false);
 	let busy = $state(false);
@@ -18,10 +20,6 @@
 	let copied = $state(false);
 
 	let file = $derived(files?.[0] ?? null);
-
-	$effect(() => {
-		audioEnabled().then((v) => (enabled = v));
-	});
 
 	async function run() {
 		if (!file || busy) return;

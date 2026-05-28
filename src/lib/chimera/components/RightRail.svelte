@@ -6,7 +6,9 @@
 	import { Database, AudioLines, Image, ArrowUpDown, Layers, X } from '@lucide/svelte';
 	import { shellState, type ChimeraPanel } from '$lib/chimera/state.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { sidecarFeatures, type SidecarFeatures } from '$lib/chimera/features';
 	import AudioPanel from './AudioPanel.svelte';
+	import ImagePanel from './ImagePanel.svelte';
 
 	type TabDef = {
 		id: ChimeraPanel;
@@ -56,6 +58,28 @@
 
 	let activePanel = $derived(shellState.activePanel);
 	let activeTab = $derived(tabs.find((t) => t.id === activePanel) ?? null);
+
+	// One-shot fetch of the sidecar's enabled modality routes. Drives both the
+	// per-panel "enabled" state and the rail's live-indicator dots. null until
+	// resolved (panels show "Checking availability…").
+	let features = $state<SidecarFeatures | null>(null);
+	$effect(() => {
+		sidecarFeatures().then((f) => (features = f));
+	});
+
+	// Whether a tab's backing route is live. Only the wired modalities map to a
+	// feature flag; the rest (rag/rerank/lora) are stubs with no flag yet.
+	function isLive(id: ChimeraPanel): boolean {
+		if (!features) return false;
+		if (id === 'audio') return features.audio;
+		if (id === 'image') return features.image;
+		return false;
+	}
+
+	function panelEnabled(id: ChimeraPanel): boolean | null {
+		if (!features) return null;
+		return isLive(id);
+	}
 </script>
 
 <aside class="flex h-full flex-row border-l border-border bg-background">
@@ -64,13 +88,19 @@
 			{@const active = activePanel === tab.id}
 			<button
 				type="button"
-				class="flex flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-[0.6rem] font-medium tracking-wide text-muted-foreground uppercase transition-colors hover:bg-accent hover:text-foreground {active
+				class="relative flex flex-col items-center justify-center gap-1 rounded-md px-1 py-2 text-[0.6rem] font-medium tracking-wide text-muted-foreground uppercase transition-colors hover:bg-accent hover:text-foreground {active
 					? 'bg-accent text-foreground'
 					: ''}"
-				title="{tab.label} — {tab.flag}"
+				title="{tab.label} — {isLive(tab.id) ? 'route enabled' : tab.flag}"
 				aria-pressed={active}
 				onclick={() => shellState.setActivePanel(tab.id)}
 			>
+				{#if isLive(tab.id)}
+					<span
+						class="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-green-500"
+						aria-hidden="true"
+					></span>
+				{/if}
 				<tab.icon size={18} />
 				<span>{tab.label}</span>
 			</button>
@@ -93,7 +123,9 @@
 
 			<div class="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
 				{#if activeTab.id === 'audio'}
-					<AudioPanel />
+					<AudioPanel enabled={panelEnabled('audio')} />
+				{:else if activeTab.id === 'image'}
+					<ImagePanel enabled={panelEnabled('image')} />
 				{:else}
 					<p class="text-sm text-muted-foreground">{activeTab.summary}</p>
 					<div

@@ -289,7 +289,15 @@
 			-->
 			<Sidebar.Inset class="flex flex-1 flex-col overflow-hidden">
 				<div class="flex flex-1 overflow-hidden">
-					<div class="flex flex-1 flex-col overflow-auto">
+					<!--
+						chimera-desktop: min-w-0 lets this flex child shrink when the
+						right rail's panel opens (without it, flex-1 keeps its content
+						width and the chat spills under the rail). relative makes it the
+						positioning context for upstream ChatScreen's absolute
+						empty-state block (`absolute left-4 right-4`), confining it to
+						the chat column instead of overlapping the rail.
+					-->
+					<div class="relative flex min-w-0 flex-1 flex-col overflow-auto">
 						{@render children?.()}
 					</div>
 					<ChimeraRightRail />

@@ -51,6 +51,20 @@ pub struct SidecarState {
     pub port: Mutex<Option<u16>>,
     pub child: Mutex<Option<ChildGuard>>,
     pub status: Mutex<SidecarStatus>,
+    // Optional modality routes enabled at spawn time. The webview can't
+    // infer these from /props (its `modalities` field describes the chat
+    // model's multimodal *inputs*, not the standalone transcription /
+    // image routes), so we record what we passed to `serve` and expose it
+    // via the sidecar_features command.
+    pub features: Mutex<SidecarFeatures>,
+}
+
+// Which optional chimera routes the sidecar was started with. Extend as
+// more modality panels (image, rerank, ...) get wired.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct SidecarFeatures {
+    // /v1/audio/transcriptions + /v1/audio/translations (--enable-audio).
+    pub audio: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -69,6 +83,27 @@ fn pick_free_port() -> std::io::Result<u16> {
     Ok(listener.local_addr()?.port())
 }
 
+// Resolve a (possibly relative) model path against the process cwd and
+// canonicalize it, verifying the file is readable. The chimera child
+// inherits Tauri's cwd (not the user's shell cwd), so a relative path
+// would otherwise resolve against the wrong directory and chimera would
+// exit with "failed to load model". Returning Err here lets the caller
+// turn a bad path into a useful message instead of a silent post-spawn
+// exit.
+fn resolve_model_path(raw: &str) -> Result<String, String> {
+    let path = std::path::PathBuf::from(raw);
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("cannot read current dir to resolve model path: {e}"))?;
+        cwd.join(&path)
+    };
+    let canonical = std::fs::canonicalize(&absolute)
+        .map_err(|e| format!("model file not readable at {}: {e}", absolute.display()))?;
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
 pub fn spawn(app: &AppHandle) -> Result<(), String> {
     let model_raw = std::env::var("CHIMERA_DESKTOP_MODEL").map_err(|_| {
         "CHIMERA_DESKTOP_MODEL is not set; export it to a .gguf path and restart".to_string()
@@ -77,26 +112,10 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
     // The bundled chimera child inherits Tauri's cwd, which is generally not
     // the user's shell cwd (and certainly not the chimera-desktop repo root
     // when launched via `make run` / `npm run tauri dev` / a Finder-launched
-    // bundle). A relative model path would resolve against the wrong cwd and
-    // chimera would exit code 3 with "failed to load model". Resolve against
-    // *our* cwd up front, then verify the file exists so the error surface
-    // is a Tauri-level `Failed(...)` with a useful message rather than a
-    // silent post-spawn exit.
-    let model_path = std::path::PathBuf::from(&model_raw);
-    let model_absolute = if model_path.is_absolute() {
-        model_path
-    } else {
-        let cwd = std::env::current_dir()
-            .map_err(|e| format!("cannot read current dir to resolve model path: {e}"))?;
-        cwd.join(&model_path)
-    };
-    let model_canonical = std::fs::canonicalize(&model_absolute).map_err(|e| {
-        format!(
-            "model file not readable at {}: {e}",
-            model_absolute.display()
-        )
-    })?;
-    let model = model_canonical.to_string_lossy().into_owned();
+    // bundle). Resolve against *our* cwd up front and verify the file exists
+    // so the error surface is a Tauri-level `Failed(...)` with a useful
+    // message rather than a silent post-spawn exit.
+    let model = resolve_model_path(&model_raw)?;
     // Unconditional: a one-line confirmation the model resolved to where
     // the user expected is high-signal for first-launch debugging and
     // costs nothing.
@@ -109,20 +128,48 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
     // SQLite store, which is what powers the persisted-chat browser
     // at /#/chimera/chats. Without this flag, /v1/chats* returns 404
     // ("chat history not enabled") and the chats panel is empty.
+    let mut args: Vec<String> = vec![
+        "serve".into(),
+        "--host".into(),
+        "127.0.0.1".into(),
+        "--port".into(),
+        port.to_string(),
+        "-m".into(),
+        model,
+        "--persist-chats".into(),
+    ];
+
+    // Optional audio transcription route. CHIMERA_DESKTOP_AUDIO_MODEL points
+    // at a whisper model (ggml/gguf); when set and readable we pass
+    // --enable-audio so chimera exposes /v1/audio/{transcriptions,translations}.
+    // Audio is optional: an unset var leaves the route off, and a set-but-
+    // unreadable path logs a warning and stays off rather than failing the
+    // whole sidecar (a broken audio path must not take down chat).
+    let mut features = SidecarFeatures::default();
+    if let Ok(raw) = std::env::var("CHIMERA_DESKTOP_AUDIO_MODEL") {
+        if !raw.trim().is_empty() {
+            match resolve_model_path(&raw) {
+                Ok(audio_model) => {
+                    eprintln!("[chimera-desktop] audio enabled: {audio_model}");
+                    args.push("--enable-audio".into());
+                    args.push(audio_model);
+                    features.audio = true;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[chimera-desktop] CHIMERA_DESKTOP_AUDIO_MODEL set but unusable: {e}; \
+                         audio route disabled"
+                    );
+                }
+            }
+        }
+    }
+
     let cmd = app
         .shell()
         .sidecar("chimera")
         .map_err(|e| format!("sidecar lookup failed: {e}"))?
-        .args([
-            "serve",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "-m",
-            &model,
-            "--persist-chats",
-        ]);
+        .args(args);
 
     let (mut rx, child) = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
 
@@ -130,6 +177,7 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
     *state.port.lock().unwrap() = Some(port);
     *state.child.lock().unwrap() = Some(ChildGuard::new(child));
     *state.status.lock().unwrap() = SidecarStatus::Starting;
+    *state.features.lock().unwrap() = features;
 
     let app_for_task = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -327,6 +375,13 @@ pub fn sidecar_port(state: tauri::State<'_, SidecarState>) -> Option<u16> {
 pub fn sidecar_status(state: tauri::State<'_, SidecarState>) -> SidecarStatus {
     let result = state.status.lock().unwrap().clone();
     debug!("sidecar_status -> {result:?}");
+    result
+}
+
+#[tauri::command]
+pub fn sidecar_features(state: tauri::State<'_, SidecarState>) -> SidecarFeatures {
+    let result = state.features.lock().unwrap().clone();
+    debug!("sidecar_features -> {result:?}");
     result
 }
 

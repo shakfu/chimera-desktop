@@ -6,6 +6,61 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Audio panel (functional speech-to-text).** The right-rail Audio
+  tab is now wired end-to-end instead of a stub: pick a local audio
+  file and transcribe it, or toggle **Translate to English**, against
+  the sidecar's OpenAI-compatible `/v1/audio/transcriptions` and
+  `/v1/audio/translations` routes. Shows the transcript with
+  duration / segment count, a copy button, and loading / error /
+  not-enabled states. Files upload via the existing fetch wrapper
+  (multipart `FormData` through `@tauri-apps/plugin-http`, bypassing
+  the webview CORS/COEP). New `src/lib/chimera/audio.ts` service and
+  `AudioPanel.svelte`.
+- **Optional audio route at spawn time.** `sidecar.rs` reads
+  `CHIMERA_DESKTOP_AUDIO_MODEL`; when set and readable it passes
+  `--enable-audio <whisper>` to `chimera serve` so the audio routes
+  are mounted. Audio is optional — an unset var or a bad path logs a
+  warning and leaves the route off rather than failing the sidecar.
+  A new `sidecar_features` Tauri command reports which optional
+  routes are live (the webview can't infer audio from `/props`, whose
+  `modalities` field describes the chat model's multimodal *inputs*,
+  not the standalone transcription route).
+- **`AUDIO_MODEL` make variable** (default `models/ggml-base.en.bin`),
+  passed through `make dev` as `CHIMERA_DESKTOP_AUDIO_MODEL` only when
+  the file exists, so a missing whisper model just leaves audio
+  disabled instead of breaking the launch.
+
+### Changed
+
+- **Bundled chimera sidecar pinned to 0.2.3** (from 0.2.2). 0.2.3
+  bumps the embedded llama.cpp / stable-diffusion.cpp engines and adds
+  Python bindings; the HTTP API and spawn contract chimera-desktop
+  depends on are unchanged (verified: spawn args plus `/health`,
+  `/v1/models`, `/props`, `/v1/chats*`, and the chat round-trip).
+- **`make dev` is now the canonical full-app launcher.** It sets
+  `CHIMERA_DESKTOP_MODEL` from `MODEL` and verifies the file exists
+  before launching — previously `dev` started the Tauri shell with no
+  model, so the sidecar always failed and the UI booted to a
+  "sidecar failed / Server endpoint not found" screen. `make run` is
+  now a backward-compatible alias for `dev`.
+- **Right rail restyled to the app's design system.** `RightRail.svelte`
+  now uses the Tailwind v4 + shadcn OKLCH theme tokens (`bg-background`,
+  `border-border`, `text-muted-foreground`, the `Button` primitive,
+  …) instead of the hardcoded dark-theme hex fallbacks that clashed
+  with the light theme.
+
+### Fixed
+
+- **Right-rail panel no longer overlaps the chat.** When a panel
+  opened, the chat column kept its full width and the panel (plus
+  upstream `ChatScreen`'s `absolute left-4 right-4` empty-state block)
+  drew on top of it. The chimera chrome wrapper now uses `min-w-0`
+  (so the chat column shrinks to make room for the rail) and
+  `relative` (so the absolute empty-state block is confined to the
+  chat column instead of resolving against a full-width ancestor).
+
 ## [0.1.0]
 
 ### Added

@@ -43,6 +43,7 @@ pub fn run() {
             ping,
             sidecar::sidecar_port,
             sidecar::sidecar_status,
+            sidecar::sidecar_features,
             sidecar::sidecar_mark_ready,
         ])
         // build().run(...) lets us hook RunEvent::Exit to kill the

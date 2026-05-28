@@ -33,6 +33,13 @@ TARGET_TRIPLE ?= $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 # directory (see README) — override with `make MODEL=/abs/path/model.gguf dev`.
 MODEL ?= models/Llama-3.2-1B-Instruct-Q8_0.gguf
 
+# Optional whisper model for the Audio panel (/v1/audio/transcriptions).
+# Passed to the sidecar as CHIMERA_DESKTOP_AUDIO_MODEL only when the file
+# actually exists, so a missing model just leaves the audio route disabled
+# instead of breaking `make dev`. Override with `make AUDIO_MODEL=/abs/path dev`.
+AUDIO_MODEL ?= models/ggml-base.en.bin
+AUDIO_ENV := $(if $(wildcard $(AUDIO_MODEL)),CHIMERA_DESKTOP_AUDIO_MODEL=$(abspath $(AUDIO_MODEL)),)
+
 # Where Tauri expects the bundled sidecar binaries.
 BINARIES_DIR := src-tauri/binaries
 
@@ -73,6 +80,7 @@ help:
 	@echo "    CHIMERA_VERSION = $(CHIMERA_VERSION)"
 	@echo "    TARGET_TRIPLE   = $(TARGET_TRIPLE)"
 	@echo "    MODEL           = $(MODEL)"
+	@echo "    AUDIO_MODEL     = $(AUDIO_MODEL)$(if $(AUDIO_ENV),, (not found; audio route disabled))"
 
 # ---- Setup ----------------------------------------------------------------
 
@@ -144,7 +152,7 @@ dev:
 		echo "       create the models symlink (see README) or pass MODEL=/abs/path"; \
 		exit 1; \
 	fi
-	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) npm run tauri dev
+	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) npm run tauri dev
 
 vite-dev:
 	npm run dev

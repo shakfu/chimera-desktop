@@ -16,7 +16,6 @@ import devtoolsJson from 'vite-plugin-devtools-json';
 //   - dropped: scss preprocessorOptions woff toggles (unused by our build)
 //   - kept: COEP/COOP headers (Pyodide), Tailwind, sveltekit, devtoolsJson
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({

@@ -1,6 +1,6 @@
 {
   "name": "chimera-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Tauri showcase desktop app for chimera (https://github.com/shakfu/chimera).",
   "private": true,
   "type": "module",
@@ -12,6 +12,8 @@
     "prepare": "svelte-kit sync || echo ''",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -43,10 +45,13 @@
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/svelte": "^5.3.1",
     "@types/node": "^24",
     "bits-ui": "^2.14.4",
     "clsx": "^2.1.1",
     "dexie": "^4.0.11",
+    "jsdom": "^29.1.1",
     "mdast": "^3.0.0",
     "mdsvex": "^0.12.3",
     "rehype-katex": "^7.0.1",
@@ -62,6 +67,7 @@
     "unified": "^11.0.5",
     "uuid": "^13.0.0",
     "vite": "^7.2.2",
-    "vite-plugin-devtools-json": "^0.2.0"
+    "vite-plugin-devtools-json": "^0.2.0",
+    "vitest": "^4.1.7"
   }
 }

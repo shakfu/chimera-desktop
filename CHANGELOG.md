@@ -6,6 +6,8 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-29
+
 ### Added
 
 - **Audio panel (functional speech-to-text).** The right-rail Audio
@@ -33,6 +35,35 @@ Versions track [Semantic Versioning](https://semver.org/).
   show source, score, and chunk text. New `src/lib/chimera/rag.ts`
   service and `RagPanel.svelte`. (Collection drop uses chimera's
   `POST /:name/delete`, not HTTP DELETE.)
+- **Rerank panel (functional cross-encoder reranking).** The
+  right-rail Rerank tab is wired to the sidecar's `/v1/rerank` route:
+  a query plus a variable list of candidate documents are scored by a
+  cross-encoder, then reordered by relevance. Results render with a
+  rank badge, a relative score bar (raw cross-encoder logits are
+  unbounded and often negative, so the bar is normalized within the
+  result set, not treated as a 0–1 probability), the raw score, and a
+  "was doc N (+/-K)" reorder indicator, plus loading / error /
+  not-enabled states. Because `/v1/rerank` returns results keyed by
+  input index and not guaranteed sorted, the client sorts descending
+  itself. New `src/lib/chimera/rerank.ts` service and
+  `RerankPanel.svelte`. Spawn wiring follows the other modalities:
+  `CHIMERA_DESKTOP_RERANK_MODEL` → `--reranking` in `sidecar.rs`, and
+  `sidecar_features` now reports a `rerank` flag. A `RERANK_MODEL` make
+  variable (default `models/bge-reranker-base-q8_0.gguf`) is passed
+  through `make dev` as `CHIMERA_DESKTOP_RERANK_MODEL` only when the
+  file exists, so a missing model just leaves the route disabled.
+- **Frontend test harness (vitest).** `make test` / `npm test` now run
+  a two-project vitest setup: a fast Node **unit** project for
+  pure-logic tests (the chimera API clients and the `sidecar.ts` fetch
+  rewriter, with `fetch` and the Tauri bridge mocked) and a jsdom
+  **svelte** project (`@testing-library/svelte` + `svelteTesting`) for
+  component tests. Initial coverage is 52 tests across the rerank /
+  RAG / audio / image clients, the `sidecar_features` probe, the fetch
+  rewriter (path rewriting, passthrough, `X-Chimera-Chat-Id`
+  injection / persistence), and the `RerankPanel` component (render
+  states, the query-plus-two-documents gate, and the rerank
+  call + results rendering). Tests are split by filename: `*.test.ts`
+  (Node) and `*.spec.ts` (jsdom + Svelte).
 - **Optional modality routes at spawn time.** `sidecar.rs` enables
   audio (`CHIMERA_DESKTOP_AUDIO_MODEL` → `--enable-audio`), image
   (`CHIMERA_DESKTOP_IMAGE_MODEL` → `--enable-image`), and RAG
@@ -77,6 +108,12 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`make check` is clean again.** Removed a redundant
+  `@ts-expect-error` directive in `vite.config.ts` (the `process.env`
+  access it suppressed now type-checks on its own) and an orphaned
+  upstream vitest spec (`parameter-sync.service.spec.ts`) that imported
+  a test runner the project did not vendor — both surfaced as
+  `svelte-check` errors that failed `make check`.
 - **Right-rail panel no longer overlaps the chat.** When a panel
   opened, the chat column kept its full width and the panel (plus
   upstream `ChatScreen`'s `absolute left-4 right-4` empty-state block)

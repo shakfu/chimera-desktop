@@ -23,14 +23,15 @@ End-to-end working: chat against a bundled chimera sidecar, with a chimera-speci
 - Background Rust thread probes `/health` and flips the sidecar status `Starting` → `Running` autonomously; webview reads the state via Tauri commands.
 - Webview installs a `globalThis.fetch` interceptor at module init that rewrites chimera-bound URLs (relative or origin-matching absolute) to the sidecar port, and routes them through the Tauri HTTP plugin to bypass CORS.
 - Chat completions carry the `X-Chimera-Chat-Id` header, mapping upstream's conversation id ↔ chimera's chats row id in `localStorage`.
-- Right tab rail with RAG / Audio / Image / Rerank / LoRA placeholders (stubs that name the `chimera serve` flag they need).
+- Right tab rail with functional RAG, Audio, Image, and Rerank panels — each lights up when the sidecar is started with the matching model (see § Models directory); the LoRA tab is still a stub naming the `chimera serve` flag it needs.
 - Bottom status bar: sidecar dot, base URL, loaded model alias, diagnostics link.
 - Sidecar killed on window destroy (caveat: parent-process death via Ctrl-C can leave orphans; see § Known issues).
 - Diagnostics page at `/#/chimera/health` (sidecar status, port, `/v1/models`, `/props` excerpt).
+- Frontend test suite (`make test`): a Node unit project (vitest) covering the chimera API clients and the `globalThis.fetch` rewriter, plus a jsdom + Testing Library project for component tests.
 
 ### Not yet here
 
-- Live wiring for the right-rail panels — currently each tab opens a slide-out that names the flag and links to docs; the actual UI for RAG ingest / audio transcription / image generation / rerank / LoRA hot-swap is future work.
+- LoRA panel wiring — the LoRA tab is still a stub; live `GET`/`POST /lora-adapters` hot-swap UI is future work. (The RAG, Audio, Image, and Rerank panels are now wired.)
 - Persisted-chat left rail (`chimera-desktop-plan.md` §6.3 has a fourth column for `/v1/chats*`; upstream's own conversation sidebar is what's there now).
 - First-run model picker UX (model path comes from the `CHIMERA_DESKTOP_MODEL` env var; `make run` handles this for you).
 - Installer / code-signing / auto-update.
@@ -87,11 +88,13 @@ The window opens to the vendored chat pane wrapped in the chimera-desktop chrome
 | `make tauri-build` | full Tauri release bundle (slow, signed) |
 | `make tauri-build-debug` | Tauri debug bundle (faster, unsigned) |
 | `make check` | svelte-check + cargo check |
+| `make test` | frontend unit + component tests (vitest) |
 | `make clean` | wipes `node_modules`, build artifacts, staged binaries |
 
 Override variables on the command line:
 
 - `make MODEL=/abs/path/Qwen3-4B-Q8_0.gguf run` — different model for one run.
+- `make AUDIO_MODEL=… IMAGE_MODEL=… RAG_MODEL=… RERANK_MODEL=… dev` — point the optional Audio / Image / RAG / Rerank panels at local models. Each route is enabled only when its file exists, so unset/missing ones simply stay off; `make help` prints the defaults (all under `models/`).
 - `make CHIMERA_BUILD=/path/to/chimera-cuda sidecar` — stage a non-default chimera build.
 - `make CHIMERA_VERSION=0.2.3 sidecar-release` — fetch a different release version.
 - `make TARGET_TRIPLE=x86_64-apple-darwin sidecar` — override the auto-detected host triple (rare; useful for cross-bundling experiments).
@@ -125,6 +128,17 @@ ln -s ~/projects/personal/cyllama/models models
 ```
 
 `models` and `models/*` are gitignored — the symlink target is never tracked.
+
+The optional right-rail panels are driven by their own models in the same directory, each enabled only when the file is present (defaults printed by `make help`, override with the matching make variable):
+
+| panel | default `models/…` file | make variable | `chimera serve` flag |
+|---|---|---|---|
+| Audio | `ggml-base.en.bin` | `AUDIO_MODEL` | `--enable-audio` |
+| Image | `sd_xl_turbo_1.0.q8_0.gguf` | `IMAGE_MODEL` | `--enable-image` |
+| RAG | `bge-small-en-v1.5-q8_0.gguf` | `RAG_MODEL` | `--enable-rag` |
+| Rerank | `bge-reranker-base-q8_0.gguf` | `RERANK_MODEL` | `--reranking` |
+
+A missing file just leaves that panel showing its "route not enabled" state; chat works regardless.
 
 ## Diagnostics
 

@@ -5,7 +5,7 @@
 # the underlying tools (vite, cargo) already do their own dependency tracking.
 
 .PHONY: help install dev vite-dev build tauri-build tauri-build-debug \
-        check svelte-check cargo-check format \
+        check svelte-check cargo-check test format \
         sidecar sidecar-from sidecar-release sidecar-clean \
         run \
         clean clean-deps clean-build clean-binaries \
@@ -89,6 +89,7 @@ help:
 	@echo "    check                svelte-check + cargo check"
 	@echo "    svelte-check         frontend type check only"
 	@echo "    cargo-check          Rust shell type check only"
+	@echo "    test                 frontend unit tests (vitest run)"
 	@echo ""
 	@echo "  housekeeping:"
 	@echo "    clean                clean-deps + clean-build + clean-binaries"
@@ -204,6 +205,11 @@ svelte-check:
 
 cargo-check:
 	cd src-tauri && cargo check
+
+# test: frontend unit tests via vitest (pure-logic; see vitest.config.ts).
+# Standalone from `check` so a quick type pass and the test run stay separable.
+test:
+	npm test
 
 # ---- Cleaning -------------------------------------------------------------
 

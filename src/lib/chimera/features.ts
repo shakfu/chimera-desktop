@@ -11,9 +11,16 @@ export interface SidecarFeatures {
 	image: boolean;
 	rag: boolean;
 	rerank: boolean;
+	lora: boolean;
 }
 
-const NONE: SidecarFeatures = { audio: false, image: false, rag: false, rerank: false };
+const NONE: SidecarFeatures = {
+	audio: false,
+	image: false,
+	rag: false,
+	rerank: false,
+	lora: false
+};
 
 // Fetch the enabled modality routes. Returns everything-disabled if the
 // command is unavailable (e.g. running in a plain browser via vite-dev).

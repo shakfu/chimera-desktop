@@ -71,6 +71,9 @@ pub struct SidecarFeatures {
     pub rag: bool,
     // /v1/rerank (--reranking).
     pub rerank: bool,
+    // /lora-adapters populated (--lora). The route is always mounted; this
+    // flag reflects whether any adapter was actually loaded at spawn.
+    pub lora: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -135,6 +138,51 @@ fn enable_optional_model(args: &mut Vec<String>, env_var: &str, flag: &str, labe
     }
 }
 
+// Parse CHIMERA_DESKTOP_LORA — a comma-separated list of `path[:scale]`
+// entries — and push a `--lora <resolved>[:scale]` arg per usable adapter.
+// Unlike the single-file modality models this is a repeatable list, so it
+// can't reuse enable_optional_model. Each path is resolved against our cwd
+// (the chimera child inherits Tauri's cwd, not the shell's). A bad path warns
+// and skips that one adapter rather than failing the whole sidecar. Returns
+// true if at least one adapter was added. Note `/lora-adapters` is mounted
+// unconditionally by chimera; this only controls whether anything is loaded.
+fn enable_lora_adapters(args: &mut Vec<String>, env_var: &str) -> bool {
+    let raw = match std::env::var(env_var) {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => return false,
+    };
+    let mut added = false;
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        // Split an optional trailing `:scale` (a float). A bare path has no
+        // colon; `path:scale` splits on the last colon only when the suffix
+        // parses as a number (so a Windows-style drive path isn't mangled).
+        let (path_part, scale_part) = match entry.rsplit_once(':') {
+            Some((p, s)) if s.parse::<f32>().is_ok() => (p, Some(s)),
+            _ => (entry, None),
+        };
+        match resolve_model_path(path_part) {
+            Ok(resolved) => {
+                let spec = match scale_part {
+                    Some(s) => format!("{resolved}:{s}"),
+                    None => resolved,
+                };
+                eprintln!("[chimera-desktop] lora adapter enabled: {spec}");
+                args.push("--lora".to_string());
+                args.push(spec);
+                added = true;
+            }
+            Err(e) => {
+                eprintln!("[chimera-desktop] {env_var} entry unusable: {e}; skipping adapter");
+            }
+        }
+    }
+    added
+}
+
 pub fn spawn(app: &AppHandle) -> Result<(), String> {
     let model_raw = std::env::var("CHIMERA_DESKTOP_MODEL").map_err(|_| {
         "CHIMERA_DESKTOP_MODEL is not set; export it to a .gguf path and restart".to_string()
@@ -178,6 +226,7 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
     //   image  --enable-image  -> /v1/images/generations
     //   rag    --enable-rag    -> /v1/vector_stores/*
     //   rerank --reranking     -> /v1/rerank
+    //   lora   --lora          -> /lora-adapters (always mounted; populated)
     let mut features = SidecarFeatures::default();
     features.audio = enable_optional_model(
         &mut args,
@@ -203,6 +252,7 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
         "--reranking",
         "rerank",
     );
+    features.lora = enable_lora_adapters(&mut args, "CHIMERA_DESKTOP_LORA");
 
     let cmd = app
         .shell()
@@ -429,5 +479,179 @@ pub fn sidecar_mark_ready(state: tauri::State<'_, SidecarState>) {
     let mut s = state.status.lock().unwrap();
     if matches!(*s, SidecarStatus::Starting) {
         *s = SidecarStatus::Running;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enable_lora_adapters;
+    use std::fs;
+
+    // Each test uses a unique env var name and a unique temp dir so the tests
+    // are safe to run in parallel: they never share the global process
+    // environment for the same key, and never collide on the filesystem.
+    // `enable_lora_adapters` reads the env var by name (a parameter), so a
+    // per-test name fully isolates the global mutation.
+    struct Fixture {
+        dir: std::path::PathBuf,
+        env_var: &'static str,
+    }
+
+    impl Fixture {
+        fn new(tag: &'static str) -> Self {
+            let dir = std::env::temp_dir().join(format!("chimera-lora-test-{tag}"));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            Fixture { dir, env_var: tag }
+        }
+
+        // Create an adapter file and return its canonical absolute path — what
+        // `resolve_model_path` produces (e.g. /var -> /private/var on macOS),
+        // so callers can build the exact `--lora` arg the function should push.
+        fn touch(&self, name: &str) -> String {
+            let p = self.dir.join(name);
+            fs::write(&p, b"adapter").unwrap();
+            fs::canonicalize(&p).unwrap().to_string_lossy().into_owned()
+        }
+
+        // Run enable_lora_adapters with `value` (None = leave the var unset).
+        fn run(&self, value: Option<&str>) -> (Vec<String>, bool) {
+            match value {
+                Some(v) => std::env::set_var(self.env_var, v),
+                None => std::env::remove_var(self.env_var),
+            }
+            let mut args = Vec::new();
+            let added = enable_lora_adapters(&mut args, self.env_var);
+            std::env::remove_var(self.env_var);
+            (args, added)
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.dir);
+            std::env::remove_var(self.env_var);
+        }
+    }
+
+    // A non-absolute path resolves against the process cwd, which is not this
+    // dir; tests therefore always pass absolute paths (what the temp files are).
+    fn assert_no_args(args: &[String]) {
+        assert!(args.is_empty(), "expected no args, got {args:?}");
+    }
+
+    #[test]
+    fn unset_var_adds_nothing() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_UNSET");
+        let (args, added) = fx.run(None);
+        assert!(!added);
+        assert_no_args(&args);
+    }
+
+    #[test]
+    fn blank_var_adds_nothing() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_BLANK");
+        let (args, added) = fx.run(Some("   "));
+        assert!(!added);
+        assert_no_args(&args);
+    }
+
+    #[test]
+    fn bare_path_adds_lora_flag_without_scale() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_BARE");
+        let resolved = fx.touch("a.gguf");
+        let (args, added) = fx.run(Some(&resolved));
+        assert!(added);
+        assert_eq!(args, vec!["--lora".to_string(), resolved]);
+    }
+
+    #[test]
+    fn trailing_scale_is_preserved() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_SCALE");
+        let resolved = fx.touch("b.gguf");
+        let (args, added) = fx.run(Some(&format!("{resolved}:0.8")));
+        assert!(added);
+        assert_eq!(args, vec!["--lora".to_string(), format!("{resolved}:0.8")]);
+    }
+
+    #[test]
+    fn multiple_entries_each_get_their_own_flag() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_MULTI");
+        let a = fx.touch("a.gguf");
+        let b = fx.touch("b.gguf");
+        let (args, added) = fx.run(Some(&format!("{a}:0.5,{b}")));
+        assert!(added);
+        assert_eq!(
+            args,
+            vec![
+                "--lora".to_string(),
+                format!("{a}:0.5"),
+                "--lora".to_string(),
+                b,
+            ]
+        );
+    }
+
+    #[test]
+    fn blank_entries_between_commas_are_skipped() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_COMMAS");
+        let a = fx.touch("a.gguf");
+        // Leading, doubled, and trailing commas plus surrounding whitespace.
+        let (args, added) = fx.run(Some(&format!(" ,{a} , , ")));
+        assert!(added);
+        assert_eq!(args, vec!["--lora".to_string(), a]);
+    }
+
+    #[test]
+    fn unreadable_path_is_skipped_but_good_ones_remain() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_PARTIAL");
+        let good = fx.touch("good.gguf");
+        let missing = fx.dir.join("missing.gguf").to_string_lossy().into_owned();
+        let (args, added) = fx.run(Some(&format!("{missing},{good}")));
+        assert!(added, "the one good adapter should still be added");
+        assert_eq!(args, vec!["--lora".to_string(), good]);
+    }
+
+    #[test]
+    fn all_paths_unreadable_returns_false() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_ALLBAD");
+        let missing = fx.dir.join("nope.gguf").to_string_lossy().into_owned();
+        let (args, added) = fx.run(Some(&missing));
+        assert!(!added);
+        assert_no_args(&args);
+    }
+
+    // A non-numeric suffix after the last colon must NOT be split off as a
+    // scale — the whole entry is treated as a path. This guards Windows-style
+    // `C:\models\x.gguf` drive paths from being mangled into path `C` + scale
+    // `\models\x.gguf`. We assert the entry is treated as one (non-existent)
+    // path and skipped, rather than silently producing a `--lora C` arg.
+    #[test]
+    fn non_numeric_suffix_is_part_of_the_path_not_a_scale() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_DRIVE");
+        let (args, added) = fx.run(Some("C:\\models\\x.gguf"));
+        assert!(!added);
+        assert!(
+            !args.iter().any(|a| a == "C"),
+            "drive letter was mangled into a path: {args:?}"
+        );
+        assert_no_args(&args);
+    }
+
+    // A path that genuinely exists but whose basename ends in `:<number>` would
+    // be ambiguous; we document the chosen behavior — the numeric suffix wins
+    // and is treated as a scale. (resolve_model_path then fails on the
+    // stripped path, so nothing is added.) This pins the rsplit_once contract.
+    #[test]
+    fn numeric_suffix_is_always_treated_as_scale() {
+        let fx = Fixture::new("CHIMERA_DESKTOP_LORA_TEST_NUMSUFFIX");
+        // No file named "a.gguf" relative split target exists, so this resolves
+        // to a missing path and is skipped — confirming the suffix was split.
+        let entry = fx.dir.join("a.gguf").to_string_lossy().into_owned();
+        let (args, added) = fx.run(Some(&format!("{entry}:2")));
+        // The file "<dir>/a.gguf" does not exist (we never touched it), so even
+        // with the scale stripped the path is unreadable -> skipped.
+        assert!(!added);
+        assert_no_args(&args);
     }
 }

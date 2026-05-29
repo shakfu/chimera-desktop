@@ -14,25 +14,33 @@ afterEach(() => {
 
 describe('sidecarFeatures', () => {
 	it('returns the features reported by the sidecar_features command', async () => {
-		invoke.mockResolvedValueOnce({ audio: true, image: false, rag: true, rerank: true });
+		invoke.mockResolvedValueOnce({
+			audio: true,
+			image: false,
+			rag: true,
+			rerank: true,
+			lora: true
+		});
 		expect(await sidecarFeatures()).toEqual({
 			audio: true,
 			image: false,
 			rag: true,
-			rerank: true
+			rerank: true,
+			lora: true
 		});
 		expect(invoke).toHaveBeenCalledWith('sidecar_features');
 	});
 
 	it('fills missing fields from the all-disabled default', async () => {
-		// An older sidecar that does not report `rerank` should still yield a
-		// complete object with rerank defaulted to false.
+		// An older sidecar that does not report newer fields should still yield
+		// a complete object with the rest defaulted to false.
 		invoke.mockResolvedValueOnce({ audio: true });
 		expect(await sidecarFeatures()).toEqual({
 			audio: true,
 			image: false,
 			rag: false,
-			rerank: false
+			rerank: false,
+			lora: false
 		});
 	});
 
@@ -42,7 +50,8 @@ describe('sidecarFeatures', () => {
 			audio: false,
 			image: false,
 			rag: false,
-			rerank: false
+			rerank: false,
+			lora: false
 		});
 	});
 });

@@ -61,6 +61,15 @@ RAG_ENV := $(if $(wildcard $(RAG_MODEL)),CHIMERA_DESKTOP_RAG_MODEL=$(abspath $(R
 RERANK_MODEL ?= models/bge-reranker-base-q8_0.gguf
 RERANK_ENV := $(if $(wildcard $(RERANK_MODEL)),CHIMERA_DESKTOP_RERANK_MODEL=$(abspath $(RERANK_MODEL)),)
 
+# Optional LoRA adapters for the LoRA panel (GET/POST /lora-adapters). Unlike
+# the single-file modality models this is a comma-separated list of
+# `path[:scale]` entries (scale defaults to 1.0), passed to the sidecar as
+# CHIMERA_DESKTOP_LORA. Adapters must match the base MODEL. Empty by default
+# (no canonical adapter ships); paths resolve against the repo root. Example:
+#   make LORA="models/my-lora.gguf:0.8,models/other-lora.gguf" dev
+LORA ?=
+LORA_ENV := $(if $(strip $(LORA)),CHIMERA_DESKTOP_LORA=$(LORA),)
+
 # Where Tauri expects the bundled sidecar binaries.
 BINARIES_DIR := src-tauri/binaries
 
@@ -106,6 +115,7 @@ help:
 	@echo "    IMAGE_MODEL     = $(IMAGE_MODEL)$(if $(IMAGE_ENV),, (not found; image route disabled))"
 	@echo "    RAG_MODEL       = $(RAG_MODEL)$(if $(RAG_ENV),, (not found; rag route disabled))"
 	@echo "    RERANK_MODEL    = $(RERANK_MODEL)$(if $(RERANK_ENV),, (not found; rerank route disabled))"
+	@echo "    LORA            = $(if $(strip $(LORA)),$(LORA),(unset; no adapters loaded))"
 
 # ---- Setup ----------------------------------------------------------------
 
@@ -177,7 +187,7 @@ dev:
 		echo "       create the models symlink (see README) or pass MODEL=/abs/path"; \
 		exit 1; \
 	fi
-	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) $(IMAGE_ENV) $(RAG_ENV) $(RERANK_ENV) npm run tauri dev
+	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) $(IMAGE_ENV) $(RAG_ENV) $(RERANK_ENV) $(LORA_ENV) npm run tauri dev
 
 vite-dev:
 	npm run dev

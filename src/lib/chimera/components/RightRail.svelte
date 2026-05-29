@@ -1,8 +1,8 @@
 <script lang="ts">
 	// chimera-desktop right rail: a vertical strip of icon buttons plus a
-	// slide-out panel for each chimera modality. Audio, image, RAG, and rerank
-	// are wired end-to-end; the rest (lora) are stubs that document the
-	// `chimera serve` flag enabling their backing route, pending future slices.
+	// slide-out panel for each chimera modality. All five panels (RAG, audio,
+	// image, rerank, LoRA) are wired end-to-end; each lights up when the
+	// sidecar was started with the model/adapters its route needs.
 	import { Database, AudioLines, Image, ArrowUpDown, Layers, X } from '@lucide/svelte';
 	import { shellState, type ChimeraPanel } from '$lib/chimera/state.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -11,6 +11,7 @@
 	import ImagePanel from './ImagePanel.svelte';
 	import RagPanel from './RagPanel.svelte';
 	import RerankPanel from './RerankPanel.svelte';
+	import LoraPanel from './LoraPanel.svelte';
 
 	type TabDef = {
 		id: ChimeraPanel;
@@ -69,14 +70,15 @@
 		sidecarFeatures().then((f) => (features = f));
 	});
 
-	// Whether a tab's backing route is live. Only the wired modalities map to a
-	// feature flag; the rest (lora) are stubs with no flag yet.
+	// Whether a tab's backing route is live, per the sidecar's spawn-time
+	// feature flags.
 	function isLive(id: ChimeraPanel): boolean {
 		if (!features) return false;
 		if (id === 'audio') return features.audio;
 		if (id === 'image') return features.image;
 		if (id === 'rag') return features.rag;
 		if (id === 'rerank') return features.rerank;
+		if (id === 'lora') return features.lora;
 		return false;
 	}
 
@@ -134,6 +136,8 @@
 					<RagPanel enabled={panelEnabled('rag')} />
 				{:else if activeTab.id === 'rerank'}
 					<RerankPanel enabled={panelEnabled('rerank')} />
+				{:else if activeTab.id === 'lora'}
+					<LoraPanel enabled={panelEnabled('lora')} />
 				{:else}
 					<p class="text-sm text-muted-foreground">{activeTab.summary}</p>
 					<div

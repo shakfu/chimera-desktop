@@ -6,6 +6,39 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **LoRA panel (functional adapter hot-swap).** The right-rail LoRA
+  tab is now wired end-to-end instead of a stub: it lists the adapters
+  loaded at sidecar start and lets you re-weight each one with a scale
+  slider (0 disables it) and apply the new scales without a model
+  reload, against chimera's `GET` / `POST /lora-adapters` routes.
+  Unlike the other modalities, `/lora-adapters` is always mounted by
+  chimera — adapter *files* cannot be added at runtime, only loaded at
+  spawn via `--lora`, so `POST` only re-weights the loaded set. The
+  panel tracks edited-vs-server scales (dirty state gates Apply /
+  Reset), reconciles against chimera's echoed list after applying, and
+  shows probing / not-loaded-guidance / loading / error states. New
+  `src/lib/chimera/lora.ts` service and `LoraPanel.svelte`. Spawn
+  wiring: `CHIMERA_DESKTOP_LORA` (a comma-separated `path[:scale]`
+  list) is parsed in `sidecar.rs` into one `--lora` arg per usable
+  adapter — each path resolved against Tauri's cwd, a bad entry warned
+  and skipped rather than failing the sidecar, and the trailing
+  `:scale` split guarded so a Windows-style `C:\...` drive path is not
+  mangled. `sidecar_features` now reports a `lora` flag (true when at
+  least one adapter loaded; the route is mounted either way).
+- **`LORA` make variable** (unset by default — no canonical adapter
+  ships), passed through `make dev` as `CHIMERA_DESKTOP_LORA` only when
+  non-empty, e.g. `make LORA="models/a.gguf:0.8,models/b.gguf" dev`.
+- **Rust unit tests for LoRA spawn parsing.** `sidecar.rs` gains a test
+  module covering `enable_lora_adapters`: unset / blank env, bare path,
+  trailing scale, multiple comma entries, blank-entry skipping, partial
+  failure (bad adapter skipped, good one kept), all-bad, and the
+  `rsplit_once(':')` contract (numeric suffix treated as scale; a
+  non-numeric drive-letter suffix left as part of the path). Tests are
+  parallel-safe via per-test env var names and temp dirs. (Run with
+  `cargo test`; `make test` still runs only the vitest frontend suite.)
+
 ## [0.2.0] - 2026-05-29
 
 ### Added

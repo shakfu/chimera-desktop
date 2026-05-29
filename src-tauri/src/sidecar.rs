@@ -69,6 +69,8 @@ pub struct SidecarFeatures {
     pub image: bool,
     // /v1/vector_stores/* (--enable-rag).
     pub rag: bool,
+    // /v1/rerank (--reranking).
+    pub rerank: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -175,6 +177,7 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
     //   audio  --enable-audio  -> /v1/audio/{transcriptions,translations}
     //   image  --enable-image  -> /v1/images/generations
     //   rag    --enable-rag    -> /v1/vector_stores/*
+    //   rerank --reranking     -> /v1/rerank
     let mut features = SidecarFeatures::default();
     features.audio = enable_optional_model(
         &mut args,
@@ -193,6 +196,12 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
         "CHIMERA_DESKTOP_RAG_MODEL",
         "--enable-rag",
         "rag",
+    );
+    features.rerank = enable_optional_model(
+        &mut args,
+        "CHIMERA_DESKTOP_RERANK_MODEL",
+        "--reranking",
+        "rerank",
     );
 
     let cmd = app

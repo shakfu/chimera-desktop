@@ -70,9 +70,11 @@ a slide-out naming the `chimera serve` flag and nothing else.
   per-row scale slider, `POST /lora-adapters` to apply. Side-by-side
   before/after generation for the same seed makes the effect
   visible. Useful demo.
-- [ ] **Rerank panel.** Query textarea + N document textareas + Rerank
+- [x] **Rerank panel.** Query textarea + N document textareas + Rerank
   button. `POST /v1/rerank` returns ranked results. Render with
-  scores and reordering visualization.
+  scores and reordering visualization. Driven by
+  `CHIMERA_DESKTOP_RERANK_MODEL` -> `--reranking`; see
+  `src/lib/chimera/{rerank.ts,components/RerankPanel.svelte}`.
 - [ ] **Audio panel.** WAV file upload → `POST /v1/audio/transcriptions`.
   Optional "Translate to English" toggle → `/v1/audio/translations`.
   Defer mic capture until chimera accepts non-WAV formats.

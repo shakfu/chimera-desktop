@@ -18,6 +18,19 @@ import { defineConfig } from 'vitest/config';
 //                 $app/* virtual modules; a plain `$lib` alias is enough.
 const svelteAlias = { $lib: resolve('./src/lib') };
 
+// The "svelte" project runs the bare svelte() plugin, so SvelteKit's $app/*
+// virtual modules do not exist. Component tests never needed them, but a spec
+// that imports a service reaches them transitively -- models.service.ts pulls
+// the $lib/utils barrel, which reaches the settings store ($app/environment)
+// and api-fetch ($app/paths). Stub those two; $app/navigation and $app/state
+// are only imported by components no spec mounts, so they are left out until
+// something needs them.
+const svelteProjectAlias = {
+	...svelteAlias,
+	'$app/environment': resolve('./src/test/app-environment-stub.ts'),
+	'$app/paths': resolve('./src/test/app-paths-stub.ts')
+};
+
 export default defineConfig({
 	test: {
 		projects: [
@@ -32,7 +45,7 @@ export default defineConfig({
 			},
 			{
 				plugins: [svelte(), svelteTesting({ autoCleanup: false })],
-				resolve: { alias: svelteAlias },
+				resolve: { alias: svelteProjectAlias },
 				test: {
 					name: 'svelte',
 					environment: 'jsdom',

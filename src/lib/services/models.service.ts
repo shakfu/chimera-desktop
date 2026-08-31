@@ -1,5 +1,8 @@
 import { ServerModelStatus } from '$lib/enums';
 import { apiFetch, apiPost } from '$lib/utils';
+// chimera-desktop: display-name helper for the path-shaped model ids chimera
+// reports. See the note in parseModelId below.
+import { modelDisplayName } from '$lib/chimera/model-name';
 import type { ParsedModelId } from '$lib/types/models';
 import {
 	MODEL_QUANTIZATION_SEGMENT_RE,
@@ -139,15 +142,27 @@ export class ModelsService {
 			tags: []
 		};
 
+		// chimera-desktop: reduce a filesystem path to a bare model name first.
+		// chimera reports the model id as the absolute path it was loaded from,
+		// where upstream assumes a Hugging Face `org/model` id. Step 2 below
+		// splits on the FIRST slash, so an absolute path yielded an empty org
+		// and a "Users/me/models/Llama-3.2" model name -- the whole path
+		// rendered in every model chip and badge. See model-name.ts for what
+		// the helper removes and why. Applied before the colon split so a
+		// Windows `C:\...` path is not mistaken for a `model:quant`
+		// separator. `result.raw` keeps the id untouched, so the
+		// `showRawModelNames` setting still shows the full path.
+		const normalizedId = modelDisplayName(modelId);
+
 		// 1. Extract colon-separated quantization (e.g. `model:Q4_K_M`)
-		const colonIdx = modelId.indexOf(MODEL_ID_QUANTIZATION_SEPARATOR);
+		const colonIdx = normalizedId.indexOf(MODEL_ID_QUANTIZATION_SEPARATOR);
 		let modelPath: string;
 
 		if (colonIdx !== MODEL_ID_NOT_FOUND) {
-			result.quantization = modelId.slice(colonIdx + 1) || null;
-			modelPath = modelId.slice(0, colonIdx);
+			result.quantization = normalizedId.slice(colonIdx + 1) || null;
+			modelPath = normalizedId.slice(0, colonIdx);
 		} else {
-			modelPath = modelId;
+			modelPath = normalizedId;
 		}
 
 		// 2. Extract org name (e.g. `org/model` -> org = "org")

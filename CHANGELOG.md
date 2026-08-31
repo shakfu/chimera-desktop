@@ -38,6 +38,89 @@ Versions track [Semantic Versioning](https://semver.org/).
   non-numeric drive-letter suffix left as part of the path). Tests are
   parallel-safe via per-test env var names and temp dirs. (Run with
   `cargo test`; `make test` still runs only the vitest frontend suite.)
+- **`SD_EAGER_LOAD` make variable / `CHIMERA_DESKTOP_SD_EAGER_LOAD` env var**,
+  passing chimera's `--sd-eager-load` so the diffusion weights are uploaded to
+  the params backend at model-load time rather than on the Image panel's first
+  generation. Off by default: it holds every diffusion weight resident for a
+  panel many sessions never open. It does not delay startup -- chimera binds
+  its listener before the upload finishes, measured at 1.6s to `/health` with
+  and without the flag -- so the cost is memory, not launch latency. The flag
+  is passed only when the image route is on; chimera accepts it without
+  `--enable-image` but ignores it, so passing it anyway would make the spawn
+  args claim something the run does not do. A new `env_flag` helper parses the
+  boolean spellings (`1`/`true`/`yes`/`on` and negations, case-insensitive)
+  and warns on an unrecognized value rather than silently reading it as off,
+  which would otherwise make `=ture` indistinguishable from unset.
+  `SidecarFeatures` gains an `sdEagerLoad` field reporting whether the flag
+  was passed, so it is visible to the webview alongside the route flags.
+- **Spawn-flags section on the diagnostics page** (`/#/chimera/health`), which
+  previously showed no `sidecar_features` data at all. Each optional route is
+  listed on/off next to the `serve` flag that controls it, and the eager-load
+  row explains what its current state means: warmup skipped, warmup paid on
+  the first generation (with the `make SD_EAGER_LOAD=1 dev` fix), or not
+  applicable while the image route is off. These flags cannot be read from
+  `/props`, so this page is the only place they are observable.
+- **`SidecarFeatures` is now serialized `camelCase`.** `sd_eager_load` is the
+  first multi-word field, and the frontend merges the command result over an
+  all-false default -- so a snake_case key would have landed as an unread
+  extra property and left `sdEagerLoad` false forever, with nothing throwing.
+  The five existing single-word fields are identical under the rename.
+- **Rust unit tests for `env_flag`**: unset / empty / blank, every truthy and
+  falsy spelling, and the warn-and-degrade path for a typo. Parallel-safe via
+  per-test env var names, matching the existing LoRA cases. Plus a test
+  pinning the camelCase wire names, a frontend case asserting `sdEagerLoad`
+  is read from the camelCase key and not a snake_case one, and
+  `spawn-flags.spec.ts` covering the three eager-load render states.
+
+### Fixed
+
+- **The loaded model was displayed as its full filesystem path, in two places
+  at once.** chimera identifies a model by the absolute path it was loaded
+  from (that is what `-m` was given); upstream's `parseModelId` assumes a
+  Hugging Face `org/model` id and splits on the *first* slash, so an absolute
+  path produced an empty org and a `Users/me/models/Llama-3.2` model name --
+  the whole path rendered in the chat form's model chip, and again in the
+  status bar. Both now show `Llama-3.2` with `1B` / `Instruct` / `Q8_0`
+  badges. The fix normalizes the id in `parseModelId`, which has only two
+  callers, so every model chip, badge and dropdown in the vendored UI is
+  covered by one patch; `result.raw` is untouched, so upstream's
+  `showRawModelNames` setting still shows the full path, as does the status
+  bar's tooltip. The shared helper is `src/lib/chimera/model-name.ts`.
+- **`Q8_0.gguf` rendered as a tag badge rather than the quantization.** The
+  extension defeats upstream's quantization pattern, which reads the last
+  dash-separated segment. The display-name helper drops a trailing `.gguf`
+  (only that one, so a model whose real final segment resembles a suffix
+  survives), after which `Q8_0` is detected as the quantization it is.
+
+### Changed
+
+- **Bundled chimera sidecar pinned to 0.2.16** (from 0.2.3), and
+  `CHIMERA_VERSION` in the Makefile with it. The HTTP API and spawn
+  contract chimera-desktop depends on are unchanged across the range:
+  the spawn args plus `/health`, `/props`, `/v1/models`, `/slots`,
+  `/lora-adapters`, `/v1/chats*`, `/v1/rerank`, `/v1/vector_stores*`,
+  `/v1/chimera/{info,db,shutdown}` and the `X-Chimera-Chat-Id`
+  round-trip were each exercised against the 0.2.16 binary. Three of
+  the fixes it carries are reachable from panels this app drives: RAG
+  ingest never terminated when a collection's `chunk_tokens` window
+  was too small to hold its own overlap (the request hung and the
+  output vector grew without bound); the WAV parser sized its
+  allocation from an unvalidated chunk header, so a malformed upload
+  to `/v1/audio/transcriptions` could take down the whole sidecar
+  rather than fail one request; and the text-only chat path prepended
+  a second BOS, which made Llama-3 templates emit a stray
+  `<|start_header_id|>` and lose the user turn. The rest of the range
+  is engine bumps (llama.cpp b9318 -> v0.3.0, whisper.cpp v1.8.4 ->
+  v1.9.2, stable-diffusion.cpp master-650 -> master-816) and new
+  `serve` flags chimera-desktop does not pass yet -- `--sd-eager-load`
+  (pays the diffusion warmup at spawn instead of on the Image panel's
+  first generation) is the one worth wiring next.
+- **`docs/upstream-rebase.md` § 1 records that the vendored webui pin
+  is now behind the sidecar.** The fork is pinned at llama.cpp `b9119`;
+  chimera 0.2.16 carries `v0.3.0`, and upstream switched from `bNNNN`
+  tags to semver at chimera 0.2.13, so the two strings no longer
+  compare. This is staleness, not breakage -- the routes and headers
+  the app drives were verified unchanged.
 
 ## [0.2.0] - 2026-05-29
 

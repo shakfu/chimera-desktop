@@ -13,6 +13,7 @@
 	import { Circle, Link2 } from '@lucide/svelte';
 	import { shellState } from '$lib/chimera/state.svelte';
 	import { serverStore } from '$lib/stores/server.svelte';
+	import { modelDisplayName } from '$lib/chimera/model-name';
 
 	type SidecarStatusKind = 'NotStarted' | 'Starting' | 'Running' | 'Failed' | 'Exited';
 	type SidecarStatus = { kind: SidecarStatusKind; detail?: string | number };
@@ -27,7 +28,12 @@
 
 	let baseUrl = $derived(shellState.sidecarBaseUrl);
 	let status = $derived(shellState.sidecarStatus);
-	let modelAlias = $derived(serverStore.props?.model_alias ?? shellState.loadedModel ?? null);
+	// chimera reports model_alias as the absolute path it loaded from, which is
+	// far too long for a status strip (and the chat form's model chip already
+	// names the model). Show the same short name the chip does; the full path
+	// stays in the title attribute.
+	let modelPath = $derived(serverStore.props?.model_alias ?? shellState.loadedModel ?? null);
+	let modelAlias = $derived(modelPath ? modelDisplayName(modelPath) : null);
 
 	const kindToStatus: Record<SidecarStatusKind, 'unknown' | 'starting' | 'running' | 'failed' | 'exited'> = {
 		NotStarted: 'unknown',
@@ -146,7 +152,10 @@
 		<div class="chimera-statusbar__group">
 			<Circle size={10} />
 			<span class="chimera-statusbar__label">model</span>
-			<span class="chimera-statusbar__value chimera-statusbar__value--mono">{modelAlias}</span>
+			<span
+				class="chimera-statusbar__value chimera-statusbar__value--mono"
+				title={modelPath}>{modelAlias}</span
+			>
 		</div>
 	{/if}
 

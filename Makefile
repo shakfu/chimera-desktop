@@ -21,7 +21,7 @@ CHIMERA_BUILD ?= $(HOME)/projects/personal/chimera/build/chimera
 # portable (OpenSSL-free) binary from the GitHub release rather than a local
 # build. Bump this when chimera cuts a new release.
 #   https://github.com/shakfu/chimera/releases
-CHIMERA_VERSION ?= 0.2.3
+CHIMERA_VERSION ?= 0.2.16
 CHIMERA_REPO    ?= shakfu/chimera
 
 # Host target triple (Tauri expects the bundled sidecar to be suffixed with
@@ -70,6 +70,15 @@ RERANK_ENV := $(if $(wildcard $(RERANK_MODEL)),CHIMERA_DESKTOP_RERANK_MODEL=$(ab
 LORA ?=
 LORA_ENV := $(if $(strip $(LORA)),CHIMERA_DESKTOP_LORA=$(LORA),)
 
+# Pre-load stable-diffusion weights at sidecar start (`--sd-eager-load`)
+# instead of lazily on the Image panel's first generation. Only takes effect
+# alongside a usable IMAGE_MODEL; measured to cost nothing at boot (chimera
+# binds its listener before the upload finishes) but it does hold every
+# diffusion weight resident. Off by default. Enable with
+#   make SD_EAGER_LOAD=1 dev
+SD_EAGER_LOAD ?=
+SD_EAGER_ENV := $(if $(strip $(SD_EAGER_LOAD)),CHIMERA_DESKTOP_SD_EAGER_LOAD=$(SD_EAGER_LOAD),)
+
 # Where Tauri expects the bundled sidecar binaries.
 BINARIES_DIR := src-tauri/binaries
 
@@ -116,6 +125,7 @@ help:
 	@echo "    RAG_MODEL       = $(RAG_MODEL)$(if $(RAG_ENV),, (not found; rag route disabled))"
 	@echo "    RERANK_MODEL    = $(RERANK_MODEL)$(if $(RERANK_ENV),, (not found; rerank route disabled))"
 	@echo "    LORA            = $(if $(strip $(LORA)),$(LORA),(unset; no adapters loaded))"
+	@echo "    SD_EAGER_LOAD   = $(if $(strip $(SD_EAGER_LOAD)),$(SD_EAGER_LOAD)$(if $(IMAGE_ENV),, (ignored; image route disabled)),(unset; sd weights load lazily))"
 
 # ---- Setup ----------------------------------------------------------------
 
@@ -148,7 +158,7 @@ sidecar-from:
 # sidecar-release: download the prebuilt chimera release binary for the host
 # triple, verify its SHA-256 against the GitHub release digest, extract, and
 # stage it. No local chimera build required. Uses `gh` for the digest-verified
-# download. Override the version with `make CHIMERA_VERSION=0.2.3 sidecar-release`.
+# download. Override the version with `make CHIMERA_VERSION=0.2.15 sidecar-release`.
 #
 # Asset naming maps the rustc host triple to chimera's release artifacts:
 #   aarch64-apple-darwin      -> chimera-<v>-macos-arm64.tar.gz
@@ -187,7 +197,7 @@ dev:
 		echo "       create the models symlink (see README) or pass MODEL=/abs/path"; \
 		exit 1; \
 	fi
-	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) $(IMAGE_ENV) $(RAG_ENV) $(RERANK_ENV) $(LORA_ENV) npm run tauri dev
+	CHIMERA_DESKTOP_MODEL=$(abspath $(MODEL)) $(AUDIO_ENV) $(IMAGE_ENV) $(RAG_ENV) $(RERANK_ENV) $(LORA_ENV) $(SD_EAGER_ENV) npm run tauri dev
 
 vite-dev:
 	npm run dev

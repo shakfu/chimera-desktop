@@ -96,19 +96,20 @@ Override variables on the command line:
 - `make MODEL=/abs/path/Qwen3-4B-Q8_0.gguf run` — different model for one run.
 - `make AUDIO_MODEL=… IMAGE_MODEL=… RAG_MODEL=… RERANK_MODEL=… dev` — point the optional Audio / Image / RAG / Rerank panels at local models. Each route is enabled only when its file exists, so unset/missing ones simply stay off; `make help` prints the defaults (all under `models/`).
 - `make CHIMERA_BUILD=/path/to/chimera-cuda sidecar` — stage a non-default chimera build.
-- `make CHIMERA_VERSION=0.2.3 sidecar-release` — fetch a different release version.
+- `make CHIMERA_VERSION=0.2.15 sidecar-release` — fetch a different release version.
+- `make SD_EAGER_LOAD=1 dev` — pre-load the diffusion weights at startup so the Image panel's first generation skips the warmup (see [Image warmup](#image-warmup-sd_eager_load)).
 - `make TARGET_TRIPLE=x86_64-apple-darwin sidecar` — override the auto-detected host triple (rare; useful for cross-bundling experiments).
 
 ## Sidecar binary
 
 The chimera sidecar is **not committed** to this repo. Two ways to stage it into `src-tauri/binaries/chimera-<TARGET_TRIPLE>`:
 
-- `make sidecar-release` — download the prebuilt, portable (OpenSSL-free) binary from the [chimera GitHub release](https://github.com/shakfu/chimera/releases) pinned by `CHIMERA_VERSION` (default `0.2.3`). Needs the `gh` CLI; no local chimera checkout. This is the recommended path and the one the distribution model targets.
+- `make sidecar-release` — download the prebuilt, portable (OpenSSL-free) binary from the [chimera GitHub release](https://github.com/shakfu/chimera/releases) pinned by `CHIMERA_VERSION` (default `0.2.16`). Needs the `gh` CLI; no local chimera checkout. This is the recommended path and the one the distribution model targets.
 - `make sidecar` — copy from a local build at `$CHIMERA_BUILD` (default `~/projects/personal/chimera/build/chimera`). Use this when iterating on chimera itself.
 
 Tauri's `bundle.externalBin` convention appends the host target triple to the configured base name (`binaries/chimera`), which is why the file on disk must include the suffix.
 
-**Minimum chimera version: 0.2.1.** chimera-desktop's graceful-shutdown path POSTs to `/v1/chimera/shutdown`, which first appeared in chimera 0.2.1. Against an older sidecar that endpoint 404s and shutdown falls through to SIGKILL (functional, but ungraceful). 0.2.3 is the verified-compatible release: the spawn args (`serve --host --port -m --persist-chats`) and the `/health`, `/v1/models`, `/props`, `/v1/chats*`, and `X-Chimera-Chat-Id` chat-completion round-trip all work unchanged. (0.2.3 only bumps the bundled llama.cpp / stable-diffusion.cpp engines, reworks webui embedding internals, and adds Python bindings -- no change to the HTTP API or spawn contract chimera-desktop depends on.)
+**Minimum chimera version: 0.2.1.** chimera-desktop's graceful-shutdown path POSTs to `/v1/chimera/shutdown`, which first appeared in chimera 0.2.1. Against an older sidecar that endpoint 404s and shutdown falls through to SIGKILL (functional, but ungraceful). 0.2.16 is the verified-compatible release: the spawn args (`serve --host --port -m --persist-chats --enable-audio --enable-image --enable-rag --reranking --lora`) and the `/health`, `/props`, `/v1/models`, `/slots`, `/lora-adapters`, `/v1/chats*`, `/v1/rerank`, `/v1/vector_stores*`, `/v1/chimera/{info,db,shutdown}` routes plus the `X-Chimera-Chat-Id` chat-completion round-trip were all exercised against the 0.2.16 binary and are unchanged. Nothing in 0.2.4-0.2.16 touches the HTTP API or spawn contract chimera-desktop depends on; the range is engine bumps (llama.cpp b9318 -> v0.3.0, whisper.cpp v1.8.4 -> v1.9.2, stable-diffusion.cpp master-650 -> master-816), new `serve` flags chimera-desktop does not yet pass, and fixes -- three of which are reachable from panels this app drives: a non-terminating RAG chunker (`POST /v1/vector_stores/:name/files` hung and grew memory without bound when a collection's `chunk_tokens` window was too small to carry its overlap), a WAV parser that sized an allocation from an unvalidated chunk header (a malformed upload to `/v1/audio/transcriptions` could OOM the whole sidecar, not just the request), and a duplicated BOS token on the text-only chat path that made Llama-3 templates emit stray header tokens.
 
 Per-platform builds would stage:
 - `chimera-aarch64-apple-darwin`
@@ -140,9 +141,15 @@ The optional right-rail panels are driven by their own models in the same direct
 
 A missing file just leaves that panel showing its "route not enabled" state; chat works regardless.
 
+### Image warmup (`SD_EAGER_LOAD`)
+
+By default stable-diffusion loads its weights lazily, so the Image panel's *first* generation pays a warmup the later ones don't. `make SD_EAGER_LOAD=1 dev` passes chimera's `--sd-eager-load`, which uploads every diffusion weight to the params backend at model-load time instead.
+
+It is off by default because it holds all diffusion weights resident for a panel many sessions never open. It costs nothing at startup — chimera binds its HTTP listener before the upload finishes, so chat is reachable just as fast either way (measured 1.6s to `/health` with and without, `sd_xl_turbo_1.0.q8_0.gguf` on an M1). The flag is passed only when the image route is actually on; setting it with no usable `IMAGE_MODEL` logs a warning and is dropped, since chimera accepts `--sd-eager-load` without `--enable-image` but does nothing with it.
+
 ## Diagnostics
 
-- `/#/chimera/health` — sidecar status, picked port, `/v1/models` JSON, `/props` excerpt.
+- `/#/chimera/health` — sidecar status, picked port, the spawn flags (which optional routes are on, and whether `--sd-eager-load` was passed), `/v1/models` JSON, `/props` excerpt.
 - Status bar at the bottom of every screen — sidecar dot, base URL, loaded model alias.
 
 ## Implementation notes

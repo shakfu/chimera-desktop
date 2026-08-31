@@ -8,6 +8,7 @@
 
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { sidecarFeatures, type SidecarFeatures } from '$lib/chimera/features';
 
 	type SidecarStatus =
 		| { kind: 'NotStarted' }
@@ -21,16 +22,19 @@
 	let healthOk = $state(false);
 	let modelInfo = $state<unknown>(null);
 	let props = $state<unknown>(null);
+	let features = $state<SidecarFeatures | null>(null);
 	let error = $state<string | null>(null);
 
 	async function refreshStatus() {
 		try {
-			const [p, s] = await Promise.all([
+			const [p, s, f] = await Promise.all([
 				invoke<number | null>('sidecar_port'),
-				invoke<SidecarStatus>('sidecar_status')
+				invoke<SidecarStatus>('sidecar_status'),
+				sidecarFeatures()
 			]);
 			port = p;
 			status = s;
+			features = f;
 		} catch (e) {
 			error = `tauri command failed: ${e}`;
 		}
@@ -110,6 +114,49 @@
 			<dd>{healthOk ? '200 OK' : '(awaiting)'}</dd>
 		</dl>
 	</section>
+
+	{#if features}
+		<section class="diag__card">
+			<h2>Spawn flags</h2>
+			<p class="diag__note">
+				Optional routes are enabled at sidecar start from the matching
+				<code>CHIMERA_DESKTOP_*_MODEL</code> variable; a panel whose route is off shows its
+				"not enabled" state. These cannot be read from <code>/props</code>.
+			</p>
+			<dl>
+				{#each [['audio', 'Audio', '--enable-audio'], ['image', 'Image', '--enable-image'], ['rag', 'RAG', '--enable-rag'], ['rerank', 'Rerank', '--reranking'], ['lora', 'LoRA', '--lora']] as [key, label, flag] (key)}
+					<dt>{label}</dt>
+					<dd>
+						<span
+							class="diag__badge diag__badge--{features[key as keyof SidecarFeatures]
+								? 'on'
+								: 'off'}"
+						>
+							{features[key as keyof SidecarFeatures] ? 'on' : 'off'}
+						</span>
+						<code class="diag__flag">{flag}</code>
+					</dd>
+				{/each}
+				<dt>SD eager load</dt>
+				<dd>
+					<span class="diag__badge diag__badge--{features.sdEagerLoad ? 'on' : 'off'}">
+						{features.sdEagerLoad ? 'on' : 'off'}
+					</span>
+					<code class="diag__flag">--sd-eager-load</code>
+					<span class="diag__hint">
+						{#if features.sdEagerLoad}
+							diffusion weights pre-loaded; the first image generation skips the warmup
+						{:else if features.image}
+							diffusion weights load lazily, so the first image generation pays a warmup
+							(enable with <code>make SD_EAGER_LOAD=1 dev</code>)
+						{:else}
+							not applicable while the image route is off
+						{/if}
+					</span>
+				</dd>
+			</dl>
+		</section>
+	{/if}
 
 	{#if modelInfo}
 		<section class="diag__card">
@@ -256,6 +303,36 @@ npm run tauri dev</pre>
 	.diag__badge--exited {
 		background: #ffd0d0;
 		color: #5a1f1f;
+	}
+	.diag__badge--on {
+		background: #c4f3d4;
+		color: #1f5a3a;
+	}
+	.diag__badge--off {
+		background: #e0e0e0;
+		color: #555;
+	}
+
+	.diag__note {
+		margin: -0.25rem 0 0.9rem 0;
+		color: var(--muted-foreground, #777);
+		font-size: 0.85rem;
+		line-height: 1.5;
+	}
+
+	.diag__flag {
+		margin-left: 0.5em;
+		font-size: 0.85em;
+		color: var(--muted-foreground, #777);
+	}
+
+	.diag__hint {
+		display: block;
+		margin-top: 0.3em;
+		font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+		font-size: 0.8rem;
+		line-height: 1.45;
+		color: var(--muted-foreground, #777);
 	}
 
 	pre {

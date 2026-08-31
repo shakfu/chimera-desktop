@@ -17,8 +17,15 @@ Companion docs in the chimera repo:
 
 ## 1. Pin
 
-Current pin: `b9119` (matches chimera 0.2.0's `LLAMACPP_VERSION` in
-`scripts/manage.py`).
+Current pin: `b9119`, which matched chimera 0.2.0's `LLAMACPP_VERSION`.
+
+**The pin is now behind the bundled sidecar.** chimera 0.2.16 carries
+llama.cpp `v0.3.0` — upstream abandoned `bNNNN` build tags for semver at
+chimera 0.2.13, so the two version strings no longer even compare. The
+vendored webui is roughly `b9119`..`v0.3.0` stale. This is a webui-freshness
+gap, not a compatibility break: every route and header chimera-desktop
+drives was exercised against the 0.2.16 binary and is unchanged (see
+README § Sidecar binary). Nothing is broken; the fork is just old.
 
 The pin is implicit — we have no programmatic check that the vendored
 source matches the pin. If the upstream chimera HTTP shape diverges
@@ -126,12 +133,36 @@ Four insertions, all marked with `chimera-desktop:` comments:
    ```
 
 The synchronous-install + async-resolve split for fetch is
-load-bearing — see the header comment in `src/lib/chimera/sidecar.ts`.
+structural — see the header comment in `src/lib/chimera/sidecar.ts`.
 The chrome wrap preserves the outer `Sidebar.Inset` class chain so
 upstream's sidebar inset behavior (transitions, mobile collapse) is
 not disturbed.
 
-### 3.4. `package.json`
+### 3.4. `src/lib/services/models.service.ts`
+
+One insertion in `parseModelId`, marked with a `chimera-desktop:` comment:
+the raw model id is passed through `modelDisplayName()` (see § 4) before
+parsing.
+
+chimera identifies the loaded model by the absolute path it was loaded
+from, because that is what `-m` was given. Upstream assumes a Hugging
+Face `org/model` id, and step 2 of the parser splits on the *first*
+slash — so an absolute path produced an empty `orgName` and a
+`Users/me/models/Llama-3.2` `modelName`, i.e. the full path rendered in
+the chat form's model chip and every other model badge. The helper also
+drops a trailing `.gguf`, without which the last dash-separated segment
+reads `Q8_0.gguf`, fails the quantization pattern, and renders as a tag
+badge instead of the quantization.
+
+`parseModelId` has only two callers (`ModelId.svelte` and
+`stores/models.svelte.ts`), so the one patch covers every display site.
+`result.raw` is left untouched, so upstream's `showRawModelNames`
+setting still shows the full path.
+
+If upstream ever normalizes path-shaped ids itself, drop this patch
+rather than stacking on it.
+
+### 3.5. `package.json`
 
 Replaced wholesale rather than patched (the delta is too broad to
 track line-by-line):
@@ -151,7 +182,7 @@ If upstream adds a new runtime dependency, audit it for inclusion.
 If upstream upgrades the framework versions (Svelte 5 → 6, Vite 7 → 8,
 Tailwind 4 → 5), expect manual config churn on the next rebase.
 
-### 3.5. Critical: chimeraFetch must not block on baseReady
+### 3.6. Critical: chimeraFetch must not block on baseReady
 
 `src/lib/chimera/sidecar.ts` MUST NOT `await baseReady` (or any other
 promise gated on Rust command results) inside the wrapped `fetch`. The
@@ -170,7 +201,7 @@ If you ever reintroduce blocking behavior in `chimeraFetch`, the chat
 UI will show "Connecting to Server" forever and devtools will show
 `__TAURI_INTERNALS__.invoke('ping')` promises pending.
 
-### 3.6. CORS / COEP — why we route through Tauri http
+### 3.7. CORS / COEP — why we route through Tauri http
 
 chimera does not send `Access-Control-Allow-Origin` headers (no
 `--cors` flag), and upstream's `vite.config.ts` keeps
@@ -193,6 +224,7 @@ Live alongside the vendored tree; not part of any rebase merge.
 |------|------|
 | `src/lib/chimera/sidecar.ts` | fetch interceptor + X-Chimera-Chat-Id wiring + Tauri-http routing |
 | `src/lib/chimera/state.svelte.ts` | shell-owned UI state (active panel, sidecar status mirror, loaded model) |
+| `src/lib/chimera/model-name.ts` | display name for chimera's path-shaped model ids; used by the § 3.4 patch and the status bar |
 | `src/lib/chimera/components/RightRail.svelte` | right tab strip (RAG / Audio / Image / Rerank / LoRA) — stubs in v0, live wiring in future slices |
 | `src/lib/chimera/components/StatusBar.svelte` | bottom status bar (sidecar status, port, model alias, diagnostics link) |
 | `src/routes/chimera/health/+page.svelte` | sidecar diagnostics page (sibling route at `/#/chimera/health`) |

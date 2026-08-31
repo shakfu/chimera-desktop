@@ -51,17 +51,23 @@ pub struct SidecarState {
     pub port: Mutex<Option<u16>>,
     pub child: Mutex<Option<ChildGuard>>,
     pub status: Mutex<SidecarStatus>,
-    // Optional modality routes enabled at spawn time. The webview can't
-    // infer these from /props (its `modalities` field describes the chat
-    // model's multimodal *inputs*, not the standalone transcription /
-    // image routes), so we record what we passed to `serve` and expose it
-    // via the sidecar_features command.
+    // What we passed to `serve`: the optional modality routes and the
+    // spawn-time options on them. The webview can't infer these from /props
+    // (its `modalities` field describes the chat model's multimodal *inputs*,
+    // not the standalone transcription / image routes), so we record them
+    // here and expose them via the sidecar_features command.
     pub features: Mutex<SidecarFeatures>,
 }
 
-// Which optional chimera routes the sidecar was started with. Extend as
-// more modality panels (rerank, lora, ...) get wired.
+// What the sidecar was started with: the optional routes, plus the spawn-time
+// options that change how an enabled route behaves. Extend as more panels and
+// knobs get wired.
+//
+// Serialized camelCase so multi-word fields reach the webview under the names
+// its mirror declares. The five single-word fields are identical under the
+// rename, so this is not a wire-format break for them.
 #[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SidecarFeatures {
     // /v1/audio/transcriptions + /v1/audio/translations (--enable-audio).
     pub audio: bool,
@@ -74,6 +80,12 @@ pub struct SidecarFeatures {
     // /lora-adapters populated (--lora). The route is always mounted; this
     // flag reflects whether any adapter was actually loaded at spawn.
     pub lora: bool,
+    // Not a route: --sd-eager-load was passed, so the diffusion weights were
+    // uploaded at model-load time and the first image generation skips the
+    // warmup. Always false when `image` is false, since the flag is only
+    // passed alongside --enable-image. Reported so the diagnostics page can
+    // answer "why was my first image slow?".
+    pub sd_eager_load: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -183,6 +195,30 @@ fn enable_lora_adapters(args: &mut Vec<String>, env_var: &str) -> bool {
     added
 }
 
+// Parse a boolean opt-in env var. Accepts `1`/`true`/`yes`/`on` (and their
+// negations) case-insensitively; unset or empty is false. An unrecognized
+// value warns and reads as false rather than being silently ignored — the
+// same "warn and degrade, never fail the sidecar" rule the model-path
+// helpers follow, since a typo'd `CHIMERA_DESKTOP_SD_EAGER_LOAD=ture` would
+// otherwise look identical to not setting it at all.
+fn env_flag(env_var: &str) -> bool {
+    let raw = match std::env::var(env_var) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" | "0" | "false" | "no" | "off" => false,
+        "1" | "true" | "yes" | "on" => true,
+        other => {
+            eprintln!(
+                "[chimera-desktop] {env_var}={other:?} is not a boolean \
+                 (use 1/true/yes/on or 0/false/no/off); treating as off"
+            );
+            false
+        }
+    }
+}
+
 pub fn spawn(app: &AppHandle) -> Result<(), String> {
     let model_raw = std::env::var("CHIMERA_DESKTOP_MODEL").map_err(|_| {
         "CHIMERA_DESKTOP_MODEL is not set; export it to a .gguf path and restart".to_string()
@@ -253,6 +289,27 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
         "rerank",
     );
     features.lora = enable_lora_adapters(&mut args, "CHIMERA_DESKTOP_LORA");
+
+    // --sd-eager-load uploads every diffusion weight to the params backend at
+    // model-load time instead of on first use, so the Image panel's first
+    // generation doesn't pay the warmup. Gated on the image route actually
+    // being on: chimera accepts the flag without --enable-image but it is a
+    // no-op there, and passing it anyway would make the spawn args claim
+    // something the run doesn't do. Off by default — it trades load time and
+    // resident memory for first-request latency, which is only a good deal if
+    // you actually generate images.
+    if env_flag("CHIMERA_DESKTOP_SD_EAGER_LOAD") {
+        if features.image {
+            eprintln!("[chimera-desktop] sd eager load enabled");
+            args.push("--sd-eager-load".to_string());
+            features.sd_eager_load = true;
+        } else {
+            eprintln!(
+                "[chimera-desktop] CHIMERA_DESKTOP_SD_EAGER_LOAD set but the image route is \
+                 off (CHIMERA_DESKTOP_IMAGE_MODEL unset or unusable); flag not passed"
+            );
+        }
+    }
 
     let cmd = app
         .shell()
@@ -484,7 +541,7 @@ pub fn sidecar_mark_ready(state: tauri::State<'_, SidecarState>) {
 
 #[cfg(test)]
 mod tests {
-    use super::enable_lora_adapters;
+    use super::{enable_lora_adapters, env_flag, SidecarFeatures};
     use std::fs;
 
     // Each test uses a unique env var name and a unique temp dir so the tests
@@ -653,5 +710,71 @@ mod tests {
         // with the scale stripped the path is unreadable -> skipped.
         assert!(!added);
         assert_no_args(&args);
+    }
+
+    // env_flag: set the var, read it, unset it. A unique var name per case
+    // keeps the global env mutation isolated, so these stay parallel-safe
+    // alongside the LoRA cases above.
+    fn read_flag(tag: &str, value: Option<&str>) -> bool {
+        match value {
+            Some(v) => std::env::set_var(tag, v),
+            None => std::env::remove_var(tag),
+        }
+        let got = env_flag(tag);
+        std::env::remove_var(tag);
+        got
+    }
+
+    #[test]
+    fn env_flag_is_false_when_unset_or_empty() {
+        assert!(!read_flag("CHIMERA_DESKTOP_FLAG_TEST_UNSET", None));
+        assert!(!read_flag("CHIMERA_DESKTOP_FLAG_TEST_EMPTY", Some("")));
+        assert!(!read_flag("CHIMERA_DESKTOP_FLAG_TEST_BLANK", Some("   ")));
+    }
+
+    #[test]
+    fn env_flag_accepts_the_truthy_spellings_case_insensitively() {
+        for (i, v) in ["1", "true", "TRUE", "Yes", "on", " on "].iter().enumerate() {
+            let tag = format!("CHIMERA_DESKTOP_FLAG_TEST_TRUE_{i}");
+            assert!(read_flag(&tag, Some(v)), "{v:?} should be truthy");
+        }
+    }
+
+    #[test]
+    fn env_flag_accepts_the_falsy_spellings() {
+        for (i, v) in ["0", "false", "No", "OFF"].iter().enumerate() {
+            let tag = format!("CHIMERA_DESKTOP_FLAG_TEST_FALSE_{i}");
+            assert!(!read_flag(&tag, Some(v)), "{v:?} should be falsy");
+        }
+    }
+
+    // A typo must not read as "on". It warns (not asserted here) and degrades
+    // to off, which is the safe direction for an opt-in performance knob.
+    #[test]
+    fn env_flag_treats_an_unrecognized_value_as_off() {
+        assert!(!read_flag("CHIMERA_DESKTOP_FLAG_TEST_TYPO", Some("ture")));
+        assert!(!read_flag("CHIMERA_DESKTOP_FLAG_TEST_JUNK", Some("2")));
+    }
+
+    // Pins the Rust -> TS field-name contract. `sidecarFeatures()` merges the
+    // command result over an all-false default, so a name mismatch does not
+    // throw — the field just silently stays false forever. Only multi-word
+    // fields can drift (the single-word ones are identical under the rename),
+    // so this asserts both: the renamed field arrives camelCased, and a
+    // single-word one is untouched.
+    #[test]
+    fn features_serialize_to_the_camel_case_names_the_frontend_reads() {
+        let json = serde_json::to_string(&SidecarFeatures {
+            audio: true,
+            image: true,
+            rag: false,
+            rerank: false,
+            lora: false,
+            sd_eager_load: true,
+        })
+        .unwrap();
+        assert!(json.contains(r#""sdEagerLoad":true"#), "got {json}");
+        assert!(!json.contains("sd_eager_load"), "got {json}");
+        assert!(json.contains(r#""audio":true"#), "got {json}");
     }
 }

@@ -16,17 +16,19 @@ describe('sidecarFeatures', () => {
 	it('returns the features reported by the sidecar_features command', async () => {
 		invoke.mockResolvedValueOnce({
 			audio: true,
-			image: false,
+			image: true,
 			rag: true,
 			rerank: true,
-			lora: true
+			lora: true,
+			sdEagerLoad: true
 		});
 		expect(await sidecarFeatures()).toEqual({
 			audio: true,
-			image: false,
+			image: true,
 			rag: true,
 			rerank: true,
-			lora: true
+			lora: true,
+			sdEagerLoad: true
 		});
 		expect(invoke).toHaveBeenCalledWith('sidecar_features');
 	});
@@ -40,7 +42,8 @@ describe('sidecarFeatures', () => {
 			image: false,
 			rag: false,
 			rerank: false,
-			lora: false
+			lora: false,
+			sdEagerLoad: false
 		});
 	});
 
@@ -51,7 +54,21 @@ describe('sidecarFeatures', () => {
 			image: false,
 			rag: false,
 			rerank: false,
-			lora: false
+			lora: false,
+			sdEagerLoad: false
 		});
+	});
+
+	// The Rust struct is `sd_eager_load`; it reaches us camelCased via serde's
+	// rename_all. If that rename is ever dropped, the snake_case key lands as
+	// an extra property and `sdEagerLoad` silently stays false — the merge
+	// never throws — so assert the camelCase name is what actually carries.
+	it('reads sdEagerLoad from the camelCase key, not a snake_case one', async () => {
+		invoke.mockResolvedValueOnce({ image: true, sd_eager_load: true });
+		const features = await sidecarFeatures();
+		expect(features.sdEagerLoad).toBe(false);
+
+		invoke.mockResolvedValueOnce({ image: true, sdEagerLoad: true });
+		expect((await sidecarFeatures()).sdEagerLoad).toBe(true);
 	});
 });

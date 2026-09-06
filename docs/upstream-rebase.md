@@ -162,7 +162,23 @@ setting still shows the full path.
 If upstream ever normalizes path-shaped ids itself, drop this patch
 rather than stacking on it.
 
-### 3.5. `package.json`
+### 3.5. `src/styles/katex-custom.scss`
+
+Rewritten from `$var: …;` assignments plus `@import
+'katex/src/styles/katex.scss'` to a single `@use … with (…)`. Same four
+variables, same values.
+
+Upstream's note claimed the `@import` deprecation was unavoidable
+"because KaTeX uses `@import` internally". That is no longer true —
+KaTeX (0.16.47 here) is `@use`/`@forward` throughout and re-forwards
+`$use-woff2` / `$use-woff` / `$use-ttf` / `$font-folder` as `!default`,
+which is what makes them configurable from a `@use … with`. The
+generated CSS is byte-identical across the change.
+
+If a rebase restores upstream's `@import` version, re-apply this; the
+warning is otherwise printed on every `make dev`.
+
+### 3.6. `package.json`
 
 Replaced wholesale rather than patched (the delta is too broad to
 track line-by-line):
@@ -182,7 +198,7 @@ If upstream adds a new runtime dependency, audit it for inclusion.
 If upstream upgrades the framework versions (Svelte 5 → 6, Vite 7 → 8,
 Tailwind 4 → 5), expect manual config churn on the next rebase.
 
-### 3.6. Critical: chimeraFetch must not block on baseReady
+### 3.7. Critical: chimeraFetch must not block on baseReady
 
 `src/lib/chimera/sidecar.ts` MUST NOT `await baseReady` (or any other
 promise gated on Rust command results) inside the wrapped `fetch`. The
@@ -201,7 +217,7 @@ If you ever reintroduce blocking behavior in `chimeraFetch`, the chat
 UI will show "Connecting to Server" forever and devtools will show
 `__TAURI_INTERNALS__.invoke('ping')` promises pending.
 
-### 3.7. CORS / COEP — why we route through Tauri http
+### 3.8. CORS / COEP — why we route through Tauri http
 
 chimera does not send `Access-Control-Allow-Origin` headers (no
 `--cors` flag), and upstream's `vite.config.ts` keeps

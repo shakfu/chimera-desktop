@@ -86,6 +86,14 @@ Versions track [Semantic Versioning](https://semver.org/).
   covered by one patch; `result.raw` is untouched, so upstream's
   `showRawModelNames` setting still shows the full path, as does the status
   bar's tooltip. The shared helper is `src/lib/chimera/model-name.ts`.
+- **The Sass `@import` deprecation warning printed on every `make dev`.**
+  `katex-custom.scss` set four KaTeX variables and then `@import`ed
+  `katex/src/styles/katex.scss`; the file carried a note saying the warning
+  was unavoidable because KaTeX used `@import` internally. That stopped being
+  true when KaTeX moved to the Sass module system -- it is `@use`/`@forward`
+  throughout and re-forwards those four variables as `!default`, which is
+  exactly what makes them configurable from `@use ... with (...)`. Rewritten
+  as one such rule; the generated CSS is byte-identical across the change.
 - **`Q8_0.gguf` rendered as a tag badge rather than the quantization.** The
   extension defeats upstream's quantization pattern, which reads the last
   dash-separated segment. The display-name helper drops a trailing `.gguf`

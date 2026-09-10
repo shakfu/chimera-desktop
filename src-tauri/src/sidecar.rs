@@ -238,7 +238,7 @@ pub fn spawn(app: &AppHandle) -> Result<(), String> {
 
     let port = pick_free_port().map_err(|e| format!("port pick failed: {e}"))?;
 
-    // --persist-chats is load-bearing for the chimera-desktop value
+    // --persist-chats is structural for the chimera-desktop value
     // proposition: it tells chimera to save every chat turn to its
     // SQLite store, which is what powers the persisted-chat browser
     // at /#/chimera/chats. Without this flag, /v1/chats* returns 404

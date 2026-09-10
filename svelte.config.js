@@ -7,7 +7,7 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 //   - version.name: 'llama-server-webui' -> 'chimera-desktop'
 // Hash-router + relative paths + single-bundle stay as-is. They were upstream's
 // accommodations for being baked into llama-server at arbitrary paths; they're
-// also load-bearing for chimera-desktop because removing bundleStrategy:'single'
+// also key for chimera-desktop because removing bundleStrategy:'single'
 // causes SvelteKit's SSR loader to evaluate pdfjs-dist (and possibly other
 // browser-only modules) in Node, triggering "DOMMatrix is not defined" and
 // other ReferenceErrors. Fixing that would require either dynamic-importing

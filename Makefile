@@ -21,7 +21,7 @@ CHIMERA_BUILD ?= $(HOME)/projects/personal/chimera/build/chimera
 # portable (OpenSSL-free) binary from the GitHub release rather than a local
 # build. Bump this when chimera cuts a new release.
 #   https://github.com/shakfu/chimera/releases
-CHIMERA_VERSION ?= 0.2.16
+CHIMERA_VERSION ?= 0.6.0
 CHIMERA_REPO    ?= shakfu/chimera
 
 # Host target triple (Tauri expects the bundled sidecar to be suffixed with
@@ -158,7 +158,7 @@ sidecar-from:
 # sidecar-release: download the prebuilt chimera release binary for the host
 # triple, verify its SHA-256 against the GitHub release digest, extract, and
 # stage it. No local chimera build required. Uses `gh` for the digest-verified
-# download. Override the version with `make CHIMERA_VERSION=0.2.15 sidecar-release`.
+# download. Override the version with `make CHIMERA_VERSION=0.5.0 sidecar-release`.
 #
 # Asset naming maps the rustc host triple to chimera's release artifacts:
 #   aarch64-apple-darwin      -> chimera-<v>-macos-arm64.tar.gz

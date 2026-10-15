@@ -19,13 +19,15 @@ Companion docs in the chimera repo:
 
 Current pin: `b9119`, which matched chimera 0.2.0's `LLAMACPP_VERSION`.
 
-**The pin is now behind the bundled sidecar.** chimera 0.2.16 carries
-llama.cpp `v0.3.0` — upstream abandoned `bNNNN` build tags for semver at
-chimera 0.2.13, so the two version strings no longer even compare. The
-vendored webui is roughly `b9119`..`v0.3.0` stale. This is a webui-freshness
-gap, not a compatibility break: every route and header chimera-desktop
-drives was exercised against the 0.2.16 binary and is unchanged (see
-README § Sidecar binary). Nothing is broken; the fork is just old.
+**The pin is behind the bundled sidecar.** chimera 0.6.0 pins llama.cpp
+`b11429` (tagged `v0.6.0` too), about 2300 builds past `b9119`. Every
+route and header chimera-desktop drives was exercised against the 0.6.0
+binary and is unchanged (see README § Sidecar binary).
+
+Newer upstream webuis tag chat streams with `X-Conversation-Id` and stop
+them via `DELETE /v1/stream`. chimera binds that route from 0.4.1, and
+the `/v1` prefix in `CHIMERA_PATH_PREFIXES` already routes it. The
+`b9119` fork sends neither.
 
 The pin is implicit — we have no programmatic check that the vendored
 source matches the pin. If the upstream chimera HTTP shape diverges

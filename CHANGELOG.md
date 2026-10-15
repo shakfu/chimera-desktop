@@ -102,33 +102,24 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **Bundled chimera sidecar pinned to 0.2.16** (from 0.2.3), and
-  `CHIMERA_VERSION` in the Makefile with it. The HTTP API and spawn
-  contract chimera-desktop depends on are unchanged across the range:
-  the spawn args plus `/health`, `/props`, `/v1/models`, `/slots`,
-  `/lora-adapters`, `/v1/chats*`, `/v1/rerank`, `/v1/vector_stores*`,
-  `/v1/chimera/{info,db,shutdown}` and the `X-Chimera-Chat-Id`
-  round-trip were each exercised against the 0.2.16 binary. Three of
-  the fixes it carries are reachable from panels this app drives: RAG
-  ingest never terminated when a collection's `chunk_tokens` window
-  was too small to hold its own overlap (the request hung and the
-  output vector grew without bound); the WAV parser sized its
-  allocation from an unvalidated chunk header, so a malformed upload
-  to `/v1/audio/transcriptions` could take down the whole sidecar
-  rather than fail one request; and the text-only chat path prepended
-  a second BOS, which made Llama-3 templates emit a stray
-  `<|start_header_id|>` and lose the user turn. The rest of the range
-  is engine bumps (llama.cpp b9318 -> v0.3.0, whisper.cpp v1.8.4 ->
-  v1.9.2, stable-diffusion.cpp master-650 -> master-816) and new
-  `serve` flags chimera-desktop does not pass yet -- `--sd-eager-load`
-  (pays the diffusion warmup at spawn instead of on the Image panel's
-  first generation) is the one worth wiring next.
-- **`docs/upstream-rebase.md` § 1 records that the vendored webui pin
-  is now behind the sidecar.** The fork is pinned at llama.cpp `b9119`;
-  chimera 0.2.16 carries `v0.3.0`, and upstream switched from `bNNNN`
-  tags to semver at chimera 0.2.13, so the two strings no longer
-  compare. This is staleness, not breakage -- the routes and headers
-  the app drives were verified unchanged.
+- **Bundled chimera sidecar pinned to 0.6.0** (from 0.2.3), and
+  `CHIMERA_VERSION` in the Makefile with it. No app code changed: every
+  spawn flag still exists, and the routes the panels call plus the
+  `X-Chimera-Chat-Id` round-trip return the same shapes (README §
+  Sidecar binary lists what was exercised). Fixes reachable from this
+  app's panels: RAG ingest no longer hangs when a collection's
+  `chunk_tokens` window cannot hold its overlap (0.2.16); a malformed
+  WAV upload can no longer OOM the sidecar (0.2.16); the text-only chat
+  path no longer prepends a second BOS (0.2.16); an embedding input
+  longer than the context no longer aborts the process (0.3.0);
+  malformed request JSON returns 400, not 500 (0.6.0). One behaviour
+  change: `auto_fit` defaults on from 0.4.0, so the Image panel's
+  diffusion weights are placed by free memory rather than all on the
+  GPU.
+- **`docs/upstream-rebase.md` § 1 records the vendored webui pin
+  (llama.cpp `b9119`) against the sidecar's (`b11429`).** chimera
+  returned to `bNNNN` pins, so the two compare again. The gap is
+  staleness, not breakage.
 
 ## [0.2.0] - 2026-05-29
 

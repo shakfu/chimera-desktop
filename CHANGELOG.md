@@ -74,6 +74,12 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A fresh clone failed to build: `src/lib/components/app/models/` was
+  never committed.** The unanchored `models` / `models/` rules in
+  `.gitignore`, meant for the root model symlink, also matched this
+  vendored directory, so vite could not resolve `./models` in
+  `components/app/index.ts`. The rule is now `/models`, and the eight
+  files are restored from upstream `b9119`, unmodified.
 - **The loaded model was displayed as its full filesystem path, in two places
   at once.** chimera identifies a model by the absolute path it was loaded
   from (that is what `-m` was given); upstream's `parseModelId` assumes a

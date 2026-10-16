@@ -31,7 +31,7 @@ TARGET_TRIPLE ?= $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
 
 # Model used by `make dev`/`make run`. Defaults to the symlinked models/
 # directory (see README) — override with `make MODEL=/abs/path/model.gguf dev`.
-MODEL ?= models/Llama-3.2-1B-Instruct-Q8_0.gguf
+MODEL ?= models/Qwen3-0.6B-Q8_0.gguf
 
 # Optional whisper model for the Audio panel (/v1/audio/transcriptions).
 # Passed to the sidecar as CHIMERA_DESKTOP_AUDIO_MODEL only when the file

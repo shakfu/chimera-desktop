@@ -167,11 +167,24 @@
 </footer>
 
 <style>
+	/* Upstream scrolls the document and anchors its chrome to the viewport, so
+	   the bar is fixed; layout code subtracts this height where it must. */
+	:global(:root) {
+		--chimera-statusbar-h: 2rem;
+	}
+
 	.chimera-statusbar {
+		position: fixed;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		z-index: 40;
+		box-sizing: border-box;
+		height: var(--chimera-statusbar-h);
 		display: flex;
 		align-items: center;
 		gap: 1.25rem;
-		padding: 0.4rem 1rem;
+		padding: 0 1rem;
 		font-size: 0.75rem;
 		border-top: 1px solid var(--border, #333);
 		background: var(--card, #1c1c1c);

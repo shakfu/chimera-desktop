@@ -1,47 +1,34 @@
-import { mdsvex } from 'mdsvex';
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+import { mdsvex } from 'mdsvex';
 
-// chimera-desktop deltas from upstream tools/server/webui/svelte.config.js:
-//   - adapter pages/assets: '../public' -> 'build' (matches tauri.conf.json frontendDist)
-//   - version.name: 'llama-server-webui' -> 'chimera-desktop'
-// Hash-router + relative paths + single-bundle stay as-is. They were upstream's
-// accommodations for being baked into llama-server at arbitrary paths; they're
-// also key for chimera-desktop because removing bundleStrategy:'single'
-// causes SvelteKit's SSR loader to evaluate pdfjs-dist (and possibly other
-// browser-only modules) in Node, triggering "DOMMatrix is not defined" and
-// other ReferenceErrors. Fixing that would require either dynamic-importing
-// every browser-only module upstream uses, or excluding them via vite's
-// ssr.noExternal — both more invasive than keeping single-bundle.
-
+// chimera-desktop: output to build/ to match tauri.conf.json frontendDist
+// (upstream: LLAMA_UI_OUT_DIR, set by its CMake staging, else ./dist).
+const outDir = 'build';
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
-	preprocess: [vitePreprocess(), mdsvex()],
+	extensions: ['.svelte', '.svx'],
 
 	kit: {
-		paths: {
-			relative: true
-		},
-		router: { type: 'hash' },
 		adapter: adapter({
-			pages: 'build',
-			assets: 'build',
+			assets: outDir,
 			fallback: 'index.html',
+			pages: outDir,
 			precompress: false,
 			strict: true
 		}),
 		output: {
 			bundleStrategy: 'single'
 		},
-		alias: {
-			$styles: 'src/styles'
+		paths: {
+			relative: true
 		},
-		version: {
-			name: 'chimera-desktop'
-		}
+		router: { type: 'hash' }
 	},
 
-	extensions: ['.svelte', '.svx']
+	// Consult https://svelte.dev/docs/kit/integrations
+	// for more information about preprocessors
+	preprocess: [vitePreprocess(), mdsvex()]
 };
 
 export default config;

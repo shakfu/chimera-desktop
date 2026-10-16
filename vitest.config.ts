@@ -22,13 +22,14 @@ const svelteAlias = { $lib: resolve('./src/lib') };
 // virtual modules do not exist. Component tests never needed them, but a spec
 // that imports a service reaches them transitively -- models.service.ts pulls
 // the $lib/utils barrel, which reaches the settings store ($app/environment)
-// and api-fetch ($app/paths). Stub those two; $app/navigation and $app/state
-// are only imported by components no spec mounts, so they are left out until
-// something needs them.
+// and api-fetch ($app/paths); from llama.cpp b11429 the stores barrel also
+// reaches $app/navigation and $app/state. Stub all four.
 const svelteProjectAlias = {
 	...svelteAlias,
 	'$app/environment': resolve('./src/test/app-environment-stub.ts'),
-	'$app/paths': resolve('./src/test/app-paths-stub.ts')
+	'$app/navigation': resolve('./src/test/app-navigation-stub.ts'),
+	'$app/paths': resolve('./src/test/app-paths-stub.ts'),
+	'$app/state': resolve('./src/test/app-state-stub.ts')
 };
 
 export default defineConfig({

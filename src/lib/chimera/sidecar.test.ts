@@ -150,6 +150,28 @@ describe('chimera fetch wrapper — X-Chimera-Chat-Id', () => {
 		expect(saved['conv-new']).toBe('srv-77');
 	});
 
+	it('keys the chat id on the X-Conversation-Id header, dropping the ::model suffix', async () => {
+		const { fetch, tauriFetch, localStorage } = await setup({
+			tauriFetch: () => new Response('ok', { headers: { 'X-Chimera-Chat-Id': 'srv-9' } })
+		});
+
+		await fetch('./v1/chat/completions', {
+			method: 'POST',
+			headers: { 'X-Conversation-Id': 'conv-h::/models/a.gguf' },
+			body: JSON.stringify({ messages: [] })
+		});
+		expect(JSON.parse(localStorage.getItem(CHAT_ID_KEY) ?? '{}')).toEqual({ 'conv-h': 'srv-9' });
+
+		await fetch('./v1/chat/completions', {
+			method: 'POST',
+			headers: { 'X-Conversation-Id': 'conv-h' },
+			body: JSON.stringify({ messages: [] })
+		});
+		const headers = tauriFetch.mock.calls[1][1]?.headers as Headers;
+		expect(headers.get('X-Chimera-Chat-Id')).toBe('srv-9');
+		expect(headers.get('X-Conversation-Id')).toBe('conv-h');
+	});
+
 	it('does not add the header for non-chat POSTs', async () => {
 		const { fetch, tauriFetch } = await setup();
 		await fetch('/v1/rerank', { method: 'POST', body: JSON.stringify({ query: 'q' }) });

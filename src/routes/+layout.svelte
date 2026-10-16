@@ -1,69 +1,113 @@
 <script lang="ts">
 	import '../app.css';
-	// chimera-desktop: install fetch interceptor synchronously at module load
-	// AND kick off sidecar-port resolution immediately. Any chimera-bound
-	// fetches that happen during module init / mount queue behind baseReady
-	// (which resolveChimeraSidecar fulfils as soon as invoke returns the
-	// port). Without this, upstream's first /props fetch races ahead of the
-	// resolution and gets a 404, leaving the UI in a sticky "Server
-	// unavailable" state until the user clicks Retry.
+	// chimera-desktop: install the fetch interceptor and start sidecar-port
+	// resolution before any store issues its first fetch (initStores below).
+	// See docs/upstream-rebase.md § 3.3.
 	import { installChimeraFetch, resolveChimeraSidecar } from '$lib/chimera/sidecar';
 	installChimeraFetch();
 	resolveChimeraSidecar();
-	// chimera-desktop: shell chrome around the vendored upstream chat surface.
-	// See § 3.3 of docs/upstream-rebase.md for the patch sites.
 	import ChimeraRightRail from '$lib/chimera/components/RightRail.svelte';
 	import ChimeraStatusBar from '$lib/chimera/components/StatusBar.svelte';
-	import { base } from '$app/paths';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import { page } from '$app/state';
+	import { SidebarNavigation } from '$lib/components/app';
+	import { PwaMetaTags } from '$lib/components/pwa';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import {
+		FAVICON_PATHS,
+		FAVICON_SELECTORS,
+		HEADERS,
+		NEW_CHAT_TAB_ID,
+		ROUTES,
+		SETTINGS_KEYS,
+		TOOLTIP_DELAY_DURATION
+	} from '$lib/constants';
+	import { useKeyboardShortcuts } from '$lib/hooks/use-keyboard-shortcuts.svelte';
+	import { usePwa } from '$lib/hooks/use-pwa.svelte';
+	import { RouterService } from '$lib/services/router.service';
+	import {
+		chatStore,
+		conversationsStore,
+		deviceStore,
+		mcpStore,
+		modelsStore,
+		serverStore,
+		settingsStore,
+		tabsStore,
+		versionStore
+	} from '$lib/stores';
+	import { initStores } from '$lib/stores/init';
+	import { ModeWatcher } from 'mode-watcher';
 	import { untrack } from 'svelte';
 	import { onMount } from 'svelte';
-	import { fade } from 'svelte/transition';
-	import {
-		DesktopIconStrip,
-		DialogConversationTitleUpdate,
-		SidebarNavigation
-	} from '$lib/components/app';
-	import { conversationsStore } from '$lib/stores/conversations.svelte';
-	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-	import * as Tooltip from '$lib/components/ui/tooltip';
-	import { isRouterMode, serverStore } from '$lib/stores/server.svelte';
-	import { config, settingsStore } from '$lib/stores/settings.svelte';
-	import { ModeWatcher } from 'mode-watcher';
-	import { ROUTES } from '$lib/constants/routes';
-	import { RouterService } from '$lib/services/router.service';
 	import { Toaster } from 'svelte-sonner';
-	import { modelsStore } from '$lib/stores/models.svelte';
-	import { mcpStore } from '$lib/stores/mcp.svelte';
-	import { TOOLTIP_DELAY_DURATION } from '$lib/constants';
-	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
-	import { useKeyboardShortcuts } from '$lib/hooks/use-keyboard-shortcuts.svelte';
-	import { useSettingsNavigation } from '$lib/hooks/use-settings-navigation.svelte';
-	import { conversations } from '$lib/stores/conversations.svelte';
+	import { pwaAssetsHead } from 'virtual:pwa-assets/head';
 
 	let { children } = $props();
 
-	let alwaysShowSidebarOnDesktop = $derived(config().alwaysShowSidebarOnDesktop);
-	let isMobile = new IsMobile();
-	let isDesktop = $derived(!isMobile.current);
-	let sidebarOpen = $state(false);
-	let mounted = $state(false);
+	// migrations and store startup, ordered explicitly instead of import side effects
+	void initStores();
+
 	let innerHeight = $state<number | undefined>();
+	let innerWidth = $state(browser ? window.innerWidth : 0);
+
 	let chatSidebar:
-		| { activateSearchMode?: () => void; editActiveConversation?: () => void }
+		| {
+				activateSearchMode?: () => void;
+				editActiveConversation?: () => void;
+		  }
 		| undefined = $state();
 
-	let titleUpdateDialogOpen = $state(false);
-	let titleUpdateCurrentTitle = $state('');
-	let titleUpdateNewTitle = $state('');
-	let titleUpdateResolve: ((value: boolean) => void) | null = null;
+	let showBuildVersion = $derived(
+		settingsStore.config[SETTINGS_KEYS.SHOW_BUILD_VERSION] as boolean
+	);
 
-	const panelNav = useSettingsNavigation();
+	// Keep the hook object intact: destructuring needRefreshByStorage reads the getter once and freezes it
+	const pwa = usePwa();
+	const { needRefresh, updateServiceWorker } = pwa;
+
+	function updateFavicon() {
+		const dark = deviceStore.systemTheme.isDark;
+
+		let icoLink = document.querySelector(FAVICON_SELECTORS.ICO_48X48) as HTMLLinkElement | null;
+
+		if (icoLink) {
+			icoLink.href = dark ? FAVICON_PATHS.ICO_DARK : FAVICON_PATHS.ICO_LIGHT;
+		}
+
+		let svgLink = document.querySelector(FAVICON_SELECTORS.SVG_ANY) as HTMLLinkElement | null;
+
+		if (svgLink) {
+			svgLink.href = dark ? FAVICON_PATHS.SVG_DARK : FAVICON_PATHS.SVG_LIGHT;
+		}
+	}
+
+	function navigateToTab(direction: -1 | 1) {
+		// only makes sense with conversation tabs enabled
+		if (!settingsStore.config.conversationTabs) return;
+
+		const openTabs = tabsStore.openTabs;
+
+		if (openTabs.length === 0) return;
+
+		const activeId = page.params.id ?? NEW_CHAT_TAB_ID;
+		const idx = openTabs.indexOf(activeId);
+		// active tab not in list (e.g. a non-chat route): start from an edge
+		const targetIdx =
+			idx === -1
+				? direction === 1
+					? 0
+					: openTabs.length - 1
+				: (idx + direction + openTabs.length) % openTabs.length;
+
+		void tabsStore.activate(openTabs[targetIdx]);
+	}
 
 	function navigateToConversation(direction: -1 | 1) {
-		const allConvs = conversations();
+		const allConvs = conversationsStore.conversations;
+
 		if (allConvs.length === 0) return;
 
 		const currentId = page.params.id;
@@ -75,6 +119,7 @@
 		}
 
 		const idx = allConvs.findIndex((c) => c.id === currentId);
+
 		if (idx === -1) return;
 
 		const targetIdx = idx + direction;
@@ -82,77 +127,86 @@
 		if (targetIdx >= 0 && targetIdx < allConvs.length) {
 			goto(RouterService.chat(allConvs[targetIdx].id));
 		} else {
-			goto(ROUTES.NEW_CHAT);
+			conversationsStore.openNewChat();
 		}
 	}
 
+	// navigating away from the new-chat screen drops its tab, so it does not
+	// linger once the user moves to a real conversation or another route
+	let previousChatId = $state<string | undefined>(undefined);
+
+	$effect(() => {
+		const id = page.params.id ?? (page.route.id === '/(chat)' ? NEW_CHAT_TAB_ID : undefined);
+		const prev = untrack(() => previousChatId);
+
+		previousChatId = id;
+
+		if (id !== prev && prev && settingsStore.config.conversationTabs && prev === NEW_CHAT_TAB_ID) {
+			untrack(() => tabsStore.removeTabs([NEW_CHAT_TAB_ID]));
+		}
+	});
 	// Global keyboard shortcuts
 	const { handleKeydown } = useKeyboardShortcuts({
 		editActiveConversation: () => chatSidebar?.editActiveConversation?.(),
-
+		navigateToNextConversation: () => navigateToConversation(1),
+		navigateToNextTab: () => navigateToTab(1),
 		navigateToPrevConversation: () => navigateToConversation(-1),
-
-		navigateToNextConversation: () => navigateToConversation(1)
+		navigateToPrevTab: () => navigateToTab(-1)
 	});
 
 	function checkApiKey() {
-		const apiKey = config().apiKey;
+		const apiKey = settingsStore.config.apiKey;
 
-		if (
-			(page.route.id === '/(chat)' || page.route.id === '/(chat)/chat/[id]') &&
-			page.status !== 401 &&
-			page.status !== 403
-		) {
-			const headers: Record<string, string> = {
-				'Content-Type': 'application/json'
-			};
+		// Without a stored key there is nothing to re-validate here; the keyless
+		// 401 case is handled by validateApiKey() at navigation time, and the
+		// reload below must never fire in a keyless loop.
+		if (!apiKey || apiKey.trim() === '') {
+			return;
+		}
 
-			if (apiKey && apiKey.trim() !== '') {
-				headers.Authorization = `Bearer ${apiKey.trim()}`;
+		untrack(() => {
+			if (
+				(page.route.id === '/(chat)' || page.route.id === '/(chat)/chat/[id]') &&
+				page.status !== 401 &&
+				page.status !== 403
+			) {
+				const headers: Record<string, string> = {
+					'Content-Type': 'application/json',
+					[HEADERS.AUTHORIZATION]: `${HEADERS.BEARER}${apiKey.trim()}`
+				};
+
+				fetch(`${base}/props`, { headers })
+					.then((response) => {
+						if (response.status === 401 || response.status === 403) {
+							window.location.reload();
+						}
+					})
+					.catch((e) => {
+						console.error('Error checking API key:', e);
+					});
 			}
-
-			fetch(`${base}/props`, { headers })
-				.then((response) => {
-					if (response.status === 401 || response.status === 403) {
-						window.location.reload();
-					}
-				})
-				.catch((e) => {
-					console.error('Error checking API key:', e);
-				});
-		}
-	}
-
-	function handleTitleUpdateCancel() {
-		titleUpdateDialogOpen = false;
-
-		if (titleUpdateResolve) {
-			titleUpdateResolve(false);
-			titleUpdateResolve = null;
-		}
-	}
-
-	function handleTitleUpdateConfirm() {
-		titleUpdateDialogOpen = false;
-
-		if (titleUpdateResolve) {
-			titleUpdateResolve(true);
-			titleUpdateResolve = null;
-		}
+		});
 	}
 
 	onMount(() => {
-		// chimera-desktop: resolveChimeraSidecar() was called at module init
-		// above, so we don't need to call it again here. mounted = true is
-		// still the upstream concern.
-		mounted = true;
+		updateFavicon();
+		// snapshot of every backend running stream on first load, populates the sidebar spinners
+		// so the user sees each conv that has a live inference, even ones not opened yet
+		void chatStore.syncRemoteRunningStreams();
 	});
 
+	// refresh that snapshot when the tab returns to the foreground, a stream may have advanced
+	// or ended while it was hidden. snapshot only, no polling
+	function handleVisibilityChange() {
+		if (document.visibilityState !== 'visible') return;
+
+		void chatStore.syncRemoteRunningStreams();
+	}
+
 	$effect(() => {
-		if (alwaysShowSidebarOnDesktop && isDesktop) {
-			sidebarOpen = true;
-			return;
-		}
+		void deviceStore.systemTheme.isDark;
+
+		updateFavicon();
 	});
 
 	// Initialize server properties on app load (run once)
@@ -170,41 +224,72 @@
 		const serverProps = serverStore.props;
 
 		if (serverProps) {
-			settingsStore.syncWithServerDefaults();
+			untrack(() => {
+				settingsStore.syncWithServerDefaults();
+			});
 		}
 	});
+
+	// Inject custom CSS at runtime through an action on the head style node
+	// textContent keeps the value as text, never parsed as HTML
+	function customCss(node: HTMLStyleElement) {
+		$effect(() => {
+			node.textContent = (settingsStore.config.customCss as string | undefined) ?? '';
+		});
+	}
 
 	// Fetch router models when in router mode (for status and modalities)
 	// Wait for models to be loaded first, run only once
 	let routerModelsFetched = false;
 
 	$effect(() => {
-		const isRouter = isRouterMode();
+		const isRouter = serverStore.isRouterMode;
 		const modelsCount = modelsStore.models.length;
 
 		// Only fetch router models once when we have models loaded and in router mode
 		if (isRouter && modelsCount > 0 && !routerModelsFetched) {
 			routerModelsFetched = true;
+
 			untrack(() => {
 				modelsStore.fetchRouterModels();
 			});
 		}
 	});
 
-	// Background MCP server health checks on app load
-	// Fetch enabled servers from settings and run health checks in background
+	// Live model status and load progress via the /models/sse feed (router mode)
+	$effect(() => {
+		if (!browser) return;
+
+		if (!serverStore.isRouterMode) return;
+
+		untrack(() => {
+			modelsStore.status.subscribe();
+		});
+
+		return () => {
+			modelsStore.status.unsubscribe();
+		};
+	});
+
+	// Background MCP server health checks on app load.
+	// Health-check every configured server with a URL - including disabled ones -
+	// so the /mcp-servers page can display health metadata for servers that are
+	// currently turned off. Disabled servers never get promoted to active
+	// connections (see runHealthCheck), so their tools/prompts/resources stay
+	// out of the chat-side stores.
+	// Only IDLE servers are checked; already-resolved (SUCCESS / ERROR) servers
+	// keep their existing state, so adding or removing a server does not flash
+	// every other card back through skeleton state.
 	$effect(() => {
 		if (!browser) return;
 
 		const mcpServers = mcpStore.getServers();
+		const serversWithUrls = mcpServers.filter((s) => s.url.trim());
 
-		// Only run health checks if we have enabled servers with URLs
-		const enabledServers = mcpServers.filter((s) => s.enabled && s.url.trim());
-
-		if (enabledServers.length > 0) {
+		if (serversWithUrls.length > 0) {
 			untrack(() => {
 				// Run health checks in background (don't await)
-				mcpStore.runHealthChecksForServers(enabledServers, false).catch((error) => {
+				mcpStore.runHealthChecksForServers(serversWithUrls, true).catch((error) => {
 					console.warn('[layout] MCP health checks failed:', error);
 				});
 			});
@@ -215,97 +300,70 @@
 	$effect(() => {
 		checkApiKey();
 	});
-
-	// Set up title update confirmation callback
-	$effect(() => {
-		conversationsStore.setTitleUpdateConfirmationCallback(
-			async (currentTitle: string, newTitle: string) => {
-				return new Promise<boolean>((resolve) => {
-					titleUpdateCurrentTitle = currentTitle;
-					titleUpdateNewTitle = newTitle;
-					titleUpdateResolve = resolve;
-					titleUpdateDialogOpen = true;
-				});
-			}
-		);
-	});
 </script>
 
+<svelte:head>
+	{#if pwaAssetsHead.themeColor}
+		<meta content={pwaAssetsHead.themeColor.content} name="theme-color" />
+	{/if}
+
+	{#if settingsStore.config.customCss}
+		<style use:customCss></style>
+	{/if}
+
+	{#each pwaAssetsHead.links as link (link.href)}
+		<link {...link} />
+	{/each}
+
+	<PwaMetaTags />
+</svelte:head>
+
+<svelte:window bind:innerHeight bind:innerWidth onkeydown={handleKeydown} />
+<svelte:document onvisibilitychange={handleVisibilityChange} />
+
 <Tooltip.Provider delayDuration={TOOLTIP_DELAY_DURATION}>
+	<div class="flex flex-col md:flex-row">
+		<SidebarNavigation
+			onSearchClick={() => {
+				if (deviceStore.isMobile) {
+					goto(ROUTES.SEARCH);
+				} else if (chatSidebar?.activateSearchMode) {
+					chatSidebar.activateSearchMode();
+				}
+			}}
+		/>
+
+		<!-- min-w-0 lets the chat column shrink below its content width, so wide
+		     code blocks and tables scroll inside their own containers instead of
+		     stretching the page into a horizontal scrollbar -->
+		<div class="min-w-0 flex-1">
+			{@render children?.()}
+		</div>
+
+		<!-- chimera-desktop: right tab rail. Sticky against the document scroll,
+		     like SidebarNavigation, and sized to stop above the fixed status bar. -->
+		<div class="sticky top-0 h-[calc(100dvh-var(--chimera-statusbar-h))] shrink-0 self-start">
+			<ChimeraRightRail />
+		</div>
+	</div>
+
+	<!-- chimera-desktop: fixed status bar, plus a spacer so the document can
+	     scroll its last content clear of it. -->
+	<div aria-hidden="true" class="h-(--chimera-statusbar-h)"></div>
+	<ChimeraStatusBar />
+
 	<ModeWatcher />
 
-	<Toaster richColors />
-
-	<DialogConversationTitleUpdate
-		bind:open={titleUpdateDialogOpen}
-		currentTitle={titleUpdateCurrentTitle}
-		newTitle={titleUpdateNewTitle}
-		onConfirm={handleTitleUpdateConfirm}
-		onCancel={handleTitleUpdateCancel}
-	/>
-
-	<Sidebar.Provider bind:open={sidebarOpen}>
-		<div class="flex h-screen w-full" style:height="{innerHeight}px">
-			<Sidebar.Root variant="floating" class="h-full">
-				<SidebarNavigation bind:this={chatSidebar} />
-			</Sidebar.Root>
-
-			{#if !(alwaysShowSidebarOnDesktop && isDesktop) && !(panelNav.isSettingsRoute && !isDesktop)}
-				{#if mounted}
-					<div in:fade={{ duration: 200 }}>
-						<Sidebar.Trigger
-							class="transition-left absolute left-0 z-[900] duration-200 ease-linear {sidebarOpen
-								? 'left-[calc(var(--sidebar-width)+0.75rem)] max-md:hidden'
-								: 'left-0!'}"
-							style="translate: 1rem 1rem;"
-						/>
-					</div>
-				{/if}
-			{/if}
-
-			{#if isDesktop && !alwaysShowSidebarOnDesktop}
-				<DesktopIconStrip
-					{sidebarOpen}
-					onSearchClick={() => {
-						if (chatSidebar?.activateSearchMode) {
-							chatSidebar.activateSearchMode();
-						}
-
-						sidebarOpen = true;
-					}}
-				/>
-			{/if}
-
-			<!--
-				chimera-desktop: wrap upstream's chat surface in a chrome that
-				adds a right tab rail and a bottom status bar. Sidebar.Inset
-				keeps its outer class chain; the inner structure splits
-				horizontally (children + rail) on top of the status bar.
-				The children wrapper uses `overflow-auto` (not `hidden`) so
-				non-chat routes like /#/chimera/chats and /#/chimera/health
-				can scroll when their content exceeds viewport height.
-				Upstream's chat route manages its own scrolling internally
-				and is unaffected.
-			-->
-			<Sidebar.Inset class="flex flex-1 flex-col overflow-hidden">
-				<div class="flex flex-1 overflow-hidden">
-					<!--
-						chimera-desktop: min-w-0 lets this flex child shrink when the
-						right rail's panel opens (without it, flex-1 keeps its content
-						width and the chat spills under the rail). relative makes it the
-						positioning context for upstream ChatScreen's absolute
-						empty-state block (`absolute left-4 right-4`), confining it to
-						the chat column instead of overlapping the rail.
-					-->
-					<div class="relative flex min-w-0 flex-1 flex-col overflow-auto">
-						{@render children?.()}
-					</div>
-					<ChimeraRightRail />
-				</div>
-				<ChimeraStatusBar />
-			</Sidebar.Inset>
-		</div>
-	</Sidebar.Provider>
+	<Toaster closeButton richColors />
 </Tooltip.Provider>
 
-<svelte:window onkeydown={handleKeydown} bind:innerHeight />
+<!-- PWA update prompt + version -->
+<div class="fixed right-4 bottom-4 z-9999 flex flex-col items-end gap-1">
+	{#if showBuildVersion && versionStore.build}
+		<span class="text-[10px] tabular-nums text-muted-foreground">{versionStore.build}</span>
+	{/if}
+
+	<!-- chimera-desktop: no PwaRefreshAlert. The bundle ships inside the app, so
+	     a version change means the app was already upgraded; the alert would ask
+	     for a reload after every upgrade. -->
+</div>

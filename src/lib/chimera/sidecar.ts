@@ -135,7 +135,12 @@ function saveChatIdMap(map: Record<string, string>): void {
 	}
 }
 
-function extractConversationId(body: unknown): string | null {
+// Upstream tags streaming chat requests with `X-Conversation-Id: <conv>[::<model>]`
+// (it sends no id in the body). The model suffix is dropped so one upstream
+// conversation maps to one chimera chat across model switches.
+function extractConversationId(headers: Headers, body: unknown): string | null {
+	const tagged = headers.get('X-Conversation-Id');
+	if (tagged) return tagged.split('::')[0] || null;
 	if (typeof body !== 'string') return null;
 	try {
 		const parsed = JSON.parse(body) as Record<string, unknown>;
@@ -214,11 +219,11 @@ async function chimeraFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 	let convId: string | null = null;
 
 	if (isChat) {
-		convId = extractConversationId(init?.body ?? null);
+		const headers = new Headers(init?.headers ?? originalRequest?.headers);
+		convId = extractConversationId(headers, init?.body ?? null);
 		if (convId) {
 			const map = loadChatIdMap();
 			const chimeraId = map[convId];
-			const headers = new Headers(init?.headers ?? originalRequest?.headers);
 			if (chimeraId) headers.set('X-Chimera-Chat-Id', chimeraId);
 			finalInit = { ...(init ?? {}), headers };
 		}

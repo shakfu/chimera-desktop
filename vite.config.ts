@@ -1,42 +1,51 @@
-import tailwindcss from '@tailwindcss/vite';
+import { buildInfoPlugin } from './scripts/vite-plugin-build-info';
+import { nerdamerPlugin } from './scripts/vite-plugin-nerdamer';
+import { relativizeBasePlugin } from './scripts/vite-plugin-relativize-base';
+import { splashScreenPlugin } from './scripts/vite-plugin-splash-screen';
+import { SVELTEKIT_PWA_OPTIONS } from './src/lib/constants/pwa.constants';
 import { sveltekit } from '@sveltejs/kit/vite';
+import tailwindcss from '@tailwindcss/vite';
+import { SvelteKitPWA } from '@vite-pwa/sveltekit';
 import { resolve } from 'path';
-
 import { defineConfig } from 'vite';
-import devtoolsJson from 'vite-plugin-devtools-json';
 
-// chimera-desktop deltas from upstream tools/server/webui/vite.config.ts:
-//   - server.port: pinned to 1420 + strictPort: true (Tauri expectation)
-//   - server.proxy: removed (chimera-desktop talks to the sidecar at a
-//     dynamic 127.0.0.1:<port> resolved at app start, not a fixed
-//     localhost:8080; see src/lib/chimera/sidecar.ts)
-//   - dropped: llamaCppBuildPlugin (upstream's static-build favicon-inline
-//     post-processor; not relevant for a Tauri bundle)
-//   - dropped: vitest test.* config (tests are not vendored)
-//   - dropped: scss preprocessorOptions woff toggles (unused by our build)
-//   - kept: COEP/COOP headers (Pyodide), Tailwind, sveltekit, devtoolsJson
+// chimera-desktop deltas from upstream tools/ui/vite.config.ts:
+//   - SvelteKitPWA: `disable: true` plus `devOptions.enabled: false` (upstream
+//     enables the dev SW, and `disable` alone does not stop it). The plugin
+//     still provides the virtual:pwa-* modules upstream imports, but no
+//     service worker is emitted or registered; a Tauri webview has no use
+//     for one and it would cache stale bundles.
+//   - server: port 1420 + strictPort (Tauri), TAURI_DEV_HOST hmr,
+//     src-tauri watch exclusion, clearScreen: false.
+//   - removed: server.proxy (sidecar.ts routes chimera paths; its
+//     CHIMERA_PATH_PREFIXES mirrors upstream's proxy list), COEP/COOP
+//     headers (can break Tauri IPC init on WKWebView), test.* projects
+//     (storybook/playwright; we run our own vitest.config.ts).
 
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-	resolve: {
-		alias: {
-			'katex-fonts': resolve('node_modules/katex/dist/fonts')
-		}
-	},
-
 	build: {
 		assetsInlineLimit: 32000,
 		chunkSizeWarningLimit: 3072,
 		minify: true
 	},
 
-	esbuild: {
-		lineLimit: 500,
-		minifyIdentifiers: false
-	},
+	plugins: [
+		tailwindcss(),
+		sveltekit(),
+		SvelteKitPWA({ ...SVELTEKIT_PWA_OPTIONS, devOptions: { enabled: false }, disable: true }),
+		splashScreenPlugin(),
+		buildInfoPlugin(),
+		nerdamerPlugin(),
+		relativizeBasePlugin()
+	],
 
-	plugins: [tailwindcss(), sveltekit(), devtoolsJson()],
+	resolve: {
+		alias: {
+			'katex-fonts': resolve('node_modules/katex/dist/fonts')
+		}
+	},
 
 	clearScreen: false,
 
@@ -44,17 +53,7 @@ export default defineConfig({
 		port: 1420,
 		strictPort: true,
 		host: host || false,
-		hmr: host
-			? {
-					protocol: 'ws',
-					host,
-					port: 1421
-				}
-			: undefined,
-		// chimera-desktop: COEP/COOP headers removed. Upstream sets them for
-		// Pyodide (Python-in-browser) support; we're not using Pyodide. They
-		// can interfere with Tauri's IPC bridge initialization on some
-		// macOS WKWebView configurations. Re-enable if Pyodide is wired up.
+		hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
 		watch: {
 			ignored: ['**/src-tauri/**']
 		}

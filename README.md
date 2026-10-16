@@ -2,7 +2,7 @@
 
 A Tauri 2 desktop application that wraps [chimera](https://github.com/shakfu/chimera) — bundling the static `chimera` binary as a sidecar process and exposing chimera's full surface (LLM, audio, image, RAG, persistent chat history) through an integrated UI.
 
-The UI is a fork of [llama.cpp's `tools/server/webui/`](https://github.com/ggml-org/llama.cpp/tree/master/tools/server/webui) (pinned to `b9119`), grafted onto a thin Tauri Rust shell that owns the chimera sidecar lifecycle and a small runtime patch layer that:
+The UI is a fork of [llama.cpp's `tools/ui/`](https://github.com/ggml-org/llama.cpp/tree/b11429/tools/ui) (pinned to `b11429`), grafted onto a thin Tauri Rust shell that owns the chimera sidecar lifecycle and a small runtime patch layer that:
 - Rewrites the upstream UI's relative API calls (`./v1/...`, `./props`, ...) to the chimera sidecar's dynamic localhost port.
 - Routes chimera-bound requests through `@tauri-apps/plugin-http` (Rust's `reqwest`) so they bypass the webview's CORS / COEP enforcement.
 - Adds `X-Chimera-Chat-Id` round-trip on chat completions so multi-turn conversations consolidate into one persisted chat row instead of one row per request (closes the gap called out in [`chimera/docs/dev/webui.md`](https://github.com/shakfu/chimera/blob/main/docs/dev/webui.md) §5.6).
@@ -128,7 +128,9 @@ Per-platform CI builds + a CDN-hosted backend matrix is the eventual plan (chime
 ln -s ~/projects/personal/cyllama/models models
 ```
 
-`models` and `models/*` are gitignored — the symlink target is never tracked.
+`/models` is gitignored — the symlink target is never tracked.
+
+The chat model defaults to `Qwen3-0.6B-Q8_0.gguf` (`MODEL`). The webui sends its built-in browser tools with every chat request. With tools present, llama.cpp `b11429` rejects a plain-text Llama-3.2 reply ("does not match the expected peg-native format"), so ordinary questions fail. Requests without tools work; to use Llama-3.2, disable the built-in tools in the chat form (untested in the app).
 
 The optional right-rail panels are driven by their own models in the same directory, each enabled only when the file is present (defaults printed by `make help`, override with the matching make variable):
 
@@ -160,7 +162,7 @@ Getting Tauri 2 working on top of a heavily-configured upstream SvelteKit fork s
 
 ```
 Makefile              Wraps npm + cargo + tauri commands. `make help` lists targets.
-src/                  Vendored SvelteKit frontend (fork of llama.cpp/tools/server/webui @ b9119)
+src/                  Vendored SvelteKit frontend (fork of llama.cpp/tools/ui @ b11429)
   app.html, app.css     Upstream entry + global styles
   routes/
     +layout.svelte      Upstream root layout (patched: see docs/upstream-rebase.md §3.3)

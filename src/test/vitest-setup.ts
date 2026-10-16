@@ -9,6 +9,22 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/svelte';
 
+// jsdom has no matchMedia; upstream's deviceStore builds MediaQuery objects
+// at import time, and the $lib/utils barrel reaches it. Never-matching stub.
+if (!window.matchMedia) {
+	window.matchMedia = (query: string) =>
+		({
+			matches: false,
+			media: query,
+			onchange: null,
+			addEventListener: () => {},
+			removeEventListener: () => {},
+			addListener: () => {},
+			removeListener: () => {},
+			dispatchEvent: () => false
+		}) as MediaQueryList;
+}
+
 afterEach(() => {
 	cleanup();
 });

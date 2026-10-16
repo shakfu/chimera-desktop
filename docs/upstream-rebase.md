@@ -1,10 +1,9 @@
 # Upstream rebase recipe
 
-chimera-desktop forks the SvelteKit source of llama.cpp's
-`tools/server/webui/` and grafts a small runtime + UI shell around it.
-This document is the recipe for re-vendoring upstream when chimera
-bumps `LLAMACPP_VERSION` (or when an interesting upstream change lands
-between bumps).
+chimera-desktop forks the SvelteKit source of llama.cpp's web UI
+(`tools/ui/`; `tools/server/webui/` at `b9119` and earlier) and grafts a
+small runtime + UI shell around it. This document is the recipe for
+re-vendoring upstream when chimera bumps `LLAMACPP_VERSION`.
 
 Companion docs in the chimera repo:
 - [`docs/dev/chimera-desktop-plan.md`](https://github.com/shakfu/chimera/blob/main/docs/dev/chimera-desktop-plan.md)
@@ -17,190 +16,139 @@ Companion docs in the chimera repo:
 
 ## 1. Pin
 
-Current pin: `b9119`, which matched chimera 0.2.0's `LLAMACPP_VERSION`.
+Current pin: `b11429`, matching chimera 0.6.0's `LLAMACPP_VERSION`.
 
-**The pin is behind the bundled sidecar.** chimera 0.6.0 pins llama.cpp
-`b11429` (tagged `v0.6.0` too), about 2300 builds past `b9119`. Every
-route and header chimera-desktop drives was exercised against the 0.6.0
-binary and is unchanged (see README § Sidecar binary).
-
-Newer upstream webuis tag chat streams with `X-Conversation-Id` and stop
-them via `DELETE /v1/stream`. chimera binds that route from 0.4.1, and
-the `/v1` prefix in `CHIMERA_PATH_PREFIXES` already routes it. The
-`b9119` fork sends neither.
-
-The pin is implicit — we have no programmatic check that the vendored
-source matches the pin. If the upstream chimera HTTP shape diverges
-across a bump (a route is renamed, a header is added/removed), the
-runtime patch surface here may need to follow.
+The pin is implicit: nothing checks that the vendored source matches it.
 
 ## 2. What is vendored
 
-Wholesale copy of `tools/server/webui/` from llama.cpp at the pinned
-ref, **excluding**:
+Copy of `tools/ui/` at the pinned ref, **excluding**:
 
-- `tests/`, `.storybook/`, `vitest-setup-client.ts`,
-  `playwright.config.ts` — testing infra not consumed by us.
-- `eslint.config.js`, `.prettierrc`, `.prettierignore` — lint config
-  not adopted (we may add our own later).
-- `scripts/dev.sh`, `scripts/post-build.sh`,
-  `scripts/install-git-hooks.sh` — upstream-specific dev workflow
-  bound to `tools/server/webui/` path layout.
-- `package-lock.json` — regenerated locally to pick up Tauri additions
-  and drop unused dev deps.
+- `tests/`, `.storybook/`, `playwright.config.ts`,
+  `vitest-setup-client.ts` — upstream test infra; we run
+  `vitest.config.ts`.
+- `eslint.config.js`, `.prettierrc`, `.prettierignore` — lint config.
+- `CMakeLists.txt`, `sources.cmake`, `ui.cpp.in`, `ui.h.in` — embed the
+  UI into llama-server.
+- `scripts/dev.sh`, `scripts/git-hooks/` — upstream dev workflow.
+- `.env.example`, `README.md`.
 
-**Kept**: `src/`, `static/`, `scripts/vite-plugin-llama-cpp-build.ts`
-(unused at runtime but kept for grep parity), `svelte.config.js`,
-`vite.config.ts`, `tsconfig.json`, `components.json`, `.npmrc`,
-`README.md`.
+**Kept**: `src/`, `static/`, `scripts/vite-plugin-*.ts`,
+`scripts/favicon-colorize.ts`, `scripts/make-icons-circular.js`,
+`svelte.config.js`, `vite.config.ts`, `tsconfig.json`,
+`components.json`, `.npmrc`, `pwa-assets*.config.ts`,
+`vitest.shims.d.ts`, and upstream's `package-lock.json` as the
+starting lockfile (see § 3.5).
+
+`.npmrc` sets `ignore-scripts=true`, so `npm install` does not run
+`prepare`. Run `npx svelte-kit sync` once after a clean install, or the
+build fails on a missing `.svelte-kit/tsconfig.json`.
 
 ## 3. Patches applied to vendored files
 
-Every patch carries a `chimera-desktop:` comment marker so a future
-maintainer can locate them with:
+Every patch carries a `chimera-desktop:` comment marker:
 
 ```bash
 grep -rn 'chimera-desktop:' src/ svelte.config.js vite.config.ts
 ```
 
-Current patch set:
-
 ### 3.1. `svelte.config.js`
 
-- `adapter` pages/assets changed from `'../public'` to `'build'` to
-  match `src-tauri/tauri.conf.json`'s `frontendDist: "../build"`.
-- `kit.version.name` renamed from `'llama-server-webui'` to
-  `'chimera-desktop'`.
-- Everything else (hash router, single-bundle output, relative paths)
-  preserved as-is — those settings make Tauri's `tauri://localhost`
-  origin work without further patches.
+`outDir` is `'build'`, matching `tauri.conf.json`'s
+`frontendDist: "../build"`. Upstream reads `LLAMA_UI_OUT_DIR` from its
+CMake staging, else `./dist`. Keep the hash router, relative paths and
+`bundleStrategy: 'single'`: without single-bundle output, SvelteKit's
+SSR pass evaluates `pdfjs-dist` in Node and fails on `DOMMatrix`.
 
 ### 3.2. `vite.config.ts`
 
-- `server.port: 1420` + `strictPort: true` added (Tauri expectation).
-- `server.proxy` block removed — chimera-desktop's chimera-bound
-  fetches go to a dynamic `127.0.0.1:<port>` resolved at runtime via
-  the fetch interceptor in `src/lib/chimera/sidecar.ts`. Upstream's
-  dev-proxy entries (`/v1`, `/props`, `/models`, `/tools`, `/slots`,
-  `/cors-proxy`) are mirrored by the interceptor's
-  `CHIMERA_PATH_PREFIXES` list — update both together.
-- `clearScreen: false` added (Tauri convention so Rust errors don't
-  get scrolled away).
-- HMR config tuned for `TAURI_DEV_HOST`.
-- Removed: `llamaCppBuildPlugin()` (upstream's `../public` favicon
-  inliner — irrelevant for a Tauri bundle), full `test.*` block (we
-  don't run upstream's vitest projects), scss `additionalData`
-  (unused by our build path).
-- Kept: COEP/COOP headers (needed for the Pyodide / Python-in-browser
-  feature should we ever wire it).
+The file header lists the deltas. The non-obvious one: `SvelteKitPWA`
+gets `disable: true` *and* `devOptions: { enabled: false }`. `disable`
+alone still registers `dev-sw.js` in dev. With both, the
+`virtual:pwa-*` modules upstream imports resolve to no-op stubs.
+
+`server.proxy` is removed. Its prefixes are mirrored by
+`CHIMERA_PATH_PREFIXES` in `src/lib/chimera/sidecar.ts`; update both
+together.
 
 ### 3.3. `src/routes/+layout.svelte`
 
-Four insertions, all marked with `chimera-desktop:` comments:
+- Top of `<script>`: `installChimeraFetch()` and
+  `resolveChimeraSidecar()`, before upstream's `initStores()` issues
+  its first fetch. Then the `RightRail` / `StatusBar` imports.
+- After the `children` column: the rail in a `sticky top-0` wrapper,
+  then a spacer of `--chimera-statusbar-h` and `<ChimeraStatusBar />`.
 
-1. Top of `<script>` — fetch interceptor install:
+From b11429 upstream scrolls the document (`use-chat-screen-scroll`
+binds `document.documentElement`) and anchors its chrome to the
+viewport with `100dvh` heights and `sticky`/`fixed` bottoms. So the
+status bar is `position: fixed`, and the sites below subtract its
+height (`--chimera-statusbar-h`, defined in `StatusBar.svelte`).
+Wrapping the app in an overflow container instead would break
+auto-scroll and clip the sidebar.
 
-   ```svelte
-   import { installChimeraFetch, resolveChimeraSidecar } from '$lib/chimera/sidecar';
-   installChimeraFetch();
-   ```
+### 3.4. Status bar offsets and startup splash
 
-2. Top of `<script>` — chrome component imports:
+- `SidebarNavigation.svelte`: `md:h-[calc(100dvh-1.125rem)]` and the
+  default expanded mobile height subtract `--chimera-statusbar-h`.
+- `ChatScreen.svelte`: the `min-h` classes and the chat form's
+  `bottom-*` offsets subtract it.
+- `ChatScreen.svelte`, startup splash: chimera binds its listener only
+  after the model loads, so `/props` fails fast while the sidecar is
+  `starting`. Until the sidecar settles, `showLoadingSplash` shows
+  `ServerLoadingSplash` with a startup message instead of the
+  server-error alert.
 
-   ```svelte
-   import ChimeraRightRail from '$lib/chimera/components/RightRail.svelte';
-   import ChimeraStatusBar from '$lib/chimera/components/StatusBar.svelte';
-   ```
+### 3.5. `package.json` and `package-lock.json`
 
-3. Inside the existing `onMount(() => { ... })`:
+`package.json` is replaced wholesale. Vendored dependencies take
+upstream's exact pins. The Tauri packages and the test stack
+(`vitest`, `jsdom`, `@testing-library/*`) are added. The storybook,
+eslint, prettier, playwright and `http-server` stacks are dropped.
 
-   ```svelte
-   resolveChimeraSidecar();
-   ```
+The four `@tauri-apps/*` npm packages are pinned to the
+major.minor of the crates in `src-tauri/Cargo.lock`. `tauri dev`
+reports a mismatch otherwise.
 
-4. Inside `<Sidebar.Inset>` — replace `{@render children?.()}` with the
-   two-level chrome split (horizontal: children + rail; vertical: that
-   row + status bar):
+Start from upstream's `package-lock.json` rather than a fresh resolve.
+A fresh resolve at b11429 pulled `esrap` 2.4.0 under Svelte 5.56.1,
+which leaves the `?` of optional parameters in compiled output
+(`function f(a?)`); rollup then fails to parse the first `.svelte`
+file with one. Upstream's lock resolves `esrap` 2.2.11.
 
-   ```svelte
-   <Sidebar.Inset class="flex flex-1 flex-col overflow-hidden">
-     <div class="flex flex-1 overflow-hidden">
-       <div class="flex flex-1 flex-col overflow-hidden">
-         {@render children?.()}
-       </div>
-       <ChimeraRightRail />
-     </div>
-     <ChimeraStatusBar />
-   </Sidebar.Inset>
-   ```
+### 3.6. `src/lib/services/chat.service.ts`
 
-The synchronous-install + async-resolve split for fetch is
-structural — see the header comment in `src/lib/chimera/sidecar.ts`.
-The chrome wrap preserves the outer `Sidebar.Inset` class chain so
-upstream's sidebar inset behavior (transitions, mobile collapse) is
-not disturbed.
+`handleStreamResponse` ends the stream on a `data: {"error": ...}`
+event and throws the server's message, which the existing `catch`
+passes to `onError`. Upstream ignores the event, sees the stream end
+without `[DONE]`, and resumes. The resume returns no bytes, so the UI
+showed "Stream resume produced no new bytes" instead of the error.
+`src/lib/chimera/stream-error.spec.ts` covers it. Drop the patch if
+upstream handles the event.
 
-### 3.4. `src/lib/services/models.service.ts`
+### 3.7. `src/app.html` and the PWA refresh alert
 
-One insertion in `parseModelId`, marked with a `chimera-desktop:` comment:
-the raw model id is passed through `modelDisplayName()` (see § 4) before
-parsing.
+- `app.html`: a head script adds the missing `/` to the start URL with
+  `history.replaceState`. WebKit loads `tauri://localhost` with no path.
+  For that non-special scheme `new URL(location.href).pathname` is `""`
+  while `location.pathname` is `"/"`. SvelteKit's hash router compares
+  the two (`is_external_url`), calls the start URL external, and does a
+  full navigation to it; the production window reloads about every
+  150 ms and stays blank. Dev (`http://localhost:1420`) and Windows
+  (`http://tauri.localhost`) use special schemes and are unaffected.
+- `+layout.svelte`: `PwaRefreshAlert` is not rendered. `use-pwa`
+  compares the build version with the one in `localStorage`; in a
+  bundled app a change means the app was already upgraded, so the
+  alert asked for a reload after every upgrade.
 
-chimera identifies the loaded model by the absolute path it was loaded
-from, because that is what `-m` was given. Upstream assumes a Hugging
-Face `org/model` id, and step 2 of the parser splits on the *first*
-slash — so an absolute path produced an empty `orgName` and a
-`Users/me/models/Llama-3.2` `modelName`, i.e. the full path rendered in
-the chat form's model chip and every other model badge. The helper also
-drops a trailing `.gguf`, without which the last dash-separated segment
-reads `Q8_0.gguf`, fails the quantization pattern, and renders as a tag
-badge instead of the quantization.
+### 3.8. Patches dropped at b11429
 
-`parseModelId` has only two callers (`ModelId.svelte` and
-`stores/models.svelte.ts`), so the one patch covers every display site.
-`result.raw` is left untouched, so upstream's `showRawModelNames`
-setting still shows the full path.
+- `models.service.ts` `parseModelId`: upstream now strips the
+  directory and weight extension itself (`normalizeModelName`).
+  `src/lib/chimera/model-id.spec.ts` still asserts the result.
+- `styles/katex-custom.scss`: upstream removed the file.
 
-If upstream ever normalizes path-shaped ids itself, drop this patch
-rather than stacking on it.
-
-### 3.5. `src/styles/katex-custom.scss`
-
-Rewritten from `$var: …;` assignments plus `@import
-'katex/src/styles/katex.scss'` to a single `@use … with (…)`. Same four
-variables, same values.
-
-Upstream's note claimed the `@import` deprecation was unavoidable
-"because KaTeX uses `@import` internally". That is no longer true —
-KaTeX (0.16.47 here) is `@use`/`@forward` throughout and re-forwards
-`$use-woff2` / `$use-woff` / `$use-ttf` / `$font-folder` as `!default`,
-which is what makes them configurable from a `@use … with`. The
-generated CSS is byte-identical across the change.
-
-If a rebase restores upstream's `@import` version, re-apply this; the
-warning is otherwise printed on every `make dev`.
-
-### 3.6. `package.json`
-
-Replaced wholesale rather than patched (the delta is too broad to
-track line-by-line):
-
-- Name renamed to `chimera-desktop`.
-- Scripts simplified: `dev` -> `vite dev`, `build` -> `vite build`
-  (no `bash scripts/dev.sh`, no `post-build.sh`); `tauri` script
-  added.
-- Added: `@tauri-apps/api`, `@tauri-apps/plugin-opener`,
-  `@tauri-apps/plugin-http`, `@tauri-apps/cli`.
-- Removed: storybook stack, vitest stack, playwright,
-  eslint/prettier toolchains, `http-server` (only used by upstream's
-  preview workflow).
-- All runtime dependencies preserved (the chat pane needs them).
-
-If upstream adds a new runtime dependency, audit it for inclusion.
-If upstream upgrades the framework versions (Svelte 5 → 6, Vite 7 → 8,
-Tailwind 4 → 5), expect manual config churn on the next rebase.
-
-### 3.7. Critical: chimeraFetch must not block on baseReady
+### 3.9. Critical: chimeraFetch must not block on baseReady
 
 `src/lib/chimera/sidecar.ts` MUST NOT `await baseReady` (or any other
 promise gated on Rust command results) inside the wrapped `fetch`. The
@@ -219,7 +167,7 @@ If you ever reintroduce blocking behavior in `chimeraFetch`, the chat
 UI will show "Connecting to Server" forever and devtools will show
 `__TAURI_INTERNALS__.invoke('ping')` promises pending.
 
-### 3.8. CORS / COEP — why we route through Tauri http
+### 3.10. CORS / COEP — why we route through Tauri http
 
 chimera does not send `Access-Control-Allow-Origin` headers (no
 `--cors` flag), and upstream's `vite.config.ts` keeps
@@ -242,71 +190,93 @@ Live alongside the vendored tree; not part of any rebase merge.
 |------|------|
 | `src/lib/chimera/sidecar.ts` | fetch interceptor + X-Chimera-Chat-Id wiring + Tauri-http routing |
 | `src/lib/chimera/state.svelte.ts` | shell-owned UI state (active panel, sidecar status mirror, loaded model) |
-| `src/lib/chimera/model-name.ts` | display name for chimera's path-shaped model ids; used by the § 3.4 patch and the status bar |
+| `src/lib/chimera/model-name.ts` | display name for chimera's path-shaped model ids, used by the status bar |
 | `src/lib/chimera/components/RightRail.svelte` | right tab strip (RAG / Audio / Image / Rerank / LoRA) — stubs in v0, live wiring in future slices |
 | `src/lib/chimera/components/StatusBar.svelte` | bottom status bar (sidecar status, port, model alias, diagnostics link) |
-| `src/routes/chimera/health/+page.svelte` | sidecar diagnostics page (sibling route at `/#/chimera/health`) |
+| `src/routes/chimera/` | chats, health and about pages (`/#/chimera/*`) |
+| `src/test/`, `vitest.config.ts` | vitest setup and `$app/*` stubs for the jsdom project |
 | `src-tauri/` | Rust shell, sidecar lifecycle, bundle config |
 | `README.md`, `LICENSE`, `.gitignore` | repo metadata |
 | `docs/` | including this file |
 
 ## 5. Rebase procedure
 
+Start from a clean, committed tree; step 3 restores the
+chimera-desktop files from `HEAD`.
+
 ```bash
-# 1. Pull upstream at the new pinned ref.
-NEW_REF=bXXXX
+# 1. Fetch upstream at the new ref.
+NEW_REF=bXXXXX
+UP=$(mktemp -d)
 curl -sL "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/refs/tags/${NEW_REF}" \
-  | tar -xz "llama.cpp-${NEW_REF}/tools/server/webui" -C /tmp
+  | tar -xz -C "$UP" "llama.cpp-${NEW_REF}/tools/ui"
+U="$UP/llama.cpp-${NEW_REF}/tools/ui"
 
-# 2. Stash chimera-desktop-only files (see § 4).
-git stash push -m "rebase-${NEW_REF}-stash" \
-  src/lib/chimera/ src/routes/chimera/ src-tauri/ \
-  README.md LICENSE .gitignore docs/ package.json
+# 2. Overwrite the vendored surface (see § 2).
+rm -rf src static scripts svelte.config.js vite.config.ts tsconfig.json \
+       components.json .npmrc pwa-assets*.config.ts vitest.shims.d.ts
+cp -R "$U"/{src,static} .
+mkdir scripts && cp "$U"/scripts/{vite-plugin-*.ts,favicon-colorize.ts,make-icons-circular.js} scripts/
+cp "$U"/{svelte.config.js,vite.config.ts,tsconfig.json,components.json,.npmrc} .
+cp "$U"/{pwa-assets.config.ts,pwa-assets-dark.config.ts,vitest.shims.d.ts} .
 
-# 3. Overwrite the vendored surface.
-rm -rf src/ static/ scripts/ \
-       svelte.config.js vite.config.ts tsconfig.json components.json .npmrc
-cp -R /tmp/llama.cpp-${NEW_REF}/tools/server/webui/{src,static,scripts} .
-cp /tmp/llama.cpp-${NEW_REF}/tools/server/webui/{svelte.config.js,vite.config.ts,tsconfig.json,components.json,.npmrc} .
+# 3. Restore chimera-desktop-only files (see § 4).
+git checkout -- src/lib/chimera src/routes/chimera src/test
 
-# 4. Restore chimera-desktop additions on top.
-git stash pop
+# 4. Re-apply the § 3 patches. `git diff HEAD -- <file>` shows the old
+#    patch against each vendored file.
 
-# 5. Re-apply the §3 patches by hand. The `chimera-desktop:` markers
-#    show where they go.
+# 5. Dependencies: merge package.json by hand (§ 3.5), seed the lock.
+cp "$U"/package-lock.json .
+rm -rf node_modules .svelte-kit build
+npm install && npx svelte-kit sync
 
-# 6. Refresh dependencies and validate.
-rm -rf node_modules package-lock.json .svelte-kit build
-npm install
-npm run build
-( cd src-tauri && cargo check )
-npm run tauri dev   # smoke test against a CHIMERA_DESKTOP_MODEL
+# 6. Validate.
+make test && npm run check && npm run build
+( cd src-tauri && cargo test )
+make dev    # send a chat; watch for in-stream errors (§ 6, item 3)
+make tauri-build
+CHIMERA_DESKTOP_MODEL=$PWD/models/<model>.gguf ./src-tauri/target/release/chimera-desktop
 ```
+
+Run the release binary, not only `make dev`. Production serves the
+bundle from `tauri://localhost`, a non-special scheme, and bugs that
+depend on it (§ 3.7) do not reproduce in dev.
 
 ## 6. What to look for during the rebase
 
 In rough order of "most likely to bite":
 
-1. **`/v1/chat/completions` request shape changes** — if upstream
-   moves to a new `/v1/responses`-style endpoint by default, the
-   `isChatCompletionsRequest` predicate in `sidecar.ts` needs the
-   new URL and the X-Chimera-Chat-Id wiring may need to relocate.
-2. **New fetch path prefixes** — diff `src/lib/services/*.ts` for new
+1. **Patches that apply but do nothing.** Upstream rewrote the root
+   layout, the stores and the scroll model between `b9119` and
+   `b11429`. Re-check each § 3 patch site by reading it, not by
+   searching for its marker.
+
+2. **`/v1/chat/completions` request shape changes** — the
+   X-Chimera-Chat-Id wiring in `sidecar.ts` keys on upstream's
+   conversation id. At `b11429` that is the `X-Conversation-Id` header
+   (`<conv>[::<model>]`), sent on streaming requests only. `b9119` sent
+   no id at all, so the wiring never fired before this rebase. If
+   upstream moves the id or the endpoint, follow it.
+3. **In-stream server errors.** If "Stream resume produced no new
+   bytes" reappears, the § 3.6 patch was lost. Read the raw SSE with
+   curl to see the server's error.
+4. **New fetch path prefixes** — diff `src/lib/services/*.ts` for new
    `fetch(` call sites; any new bare-relative path needs an entry in
    `CHIMERA_PATH_PREFIXES`. Update the upstream vite-proxy mirror in
    `vite.config.ts` if it changed too.
-3. **Routes added under new path roots** — if upstream adds e.g.
+5. **Routes added under new path roots** — if upstream adds e.g.
    `routes/admin/`, decide whether to keep, drop, or shell-replace
    that route surface. Our `routes/chimera/` namespace is reserved
    for chimera-desktop additions.
-4. **Svelte 5 → 6 / SvelteKit API changes** — the runes syntax
+6. **Svelte 5 → 6 / SvelteKit API changes** — the runes syntax
    (`$state`, `$derived`, `$props`, `$effect`) is current. A major
    framework bump may rewrite the layout shape; expect the §3.3
    patches to need re-attachment.
-5. **Tailwind major version** — the upstream `vite.config.ts`
+7. **Tailwind major version** — the upstream `vite.config.ts`
    imports `@tailwindcss/vite`. A Tailwind 4 → 5 bump changes plugin
    ergonomics; cross-reference [Tailwind upgrade guide].
-6. **New chimera-specific routes worth exposing** — if upstream adds
+8. **New chimera-specific routes worth exposing** — if upstream adds
    surfaces we want (e.g., a model-loader panel), evaluate whether to
    vendor or shell-replace. Default to vendor; revisit only when the
    upstream component blocks a chimera-only feature.

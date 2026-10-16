@@ -74,12 +74,39 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The production build showed a blank window.** WebKit loads
+  `tauri://localhost` with no path; for that non-special scheme the
+  parsed URL's pathname is `""` while `location.pathname` is `"/"`.
+  SvelteKit's hash router compares the two, treats the start URL as
+  external, and navigates to it, so the window reloaded about every
+  150 ms. `app.html` now adds the slash with `history.replaceState`
+  before SvelteKit starts. Only `tauri://` builds (Linux, likely macOS)
+  hit it; dev and Windows use `http://` origins. Found in the rebased
+  build; the `b9119` build was not tested.
+- **Every app upgrade showed "Update available, Reload to update".**
+  Upstream's web-app version check compares the bundle version with
+  the one in `localStorage`. In a desktop app the new bundle is already
+  running, so the alert is no longer rendered.
+- **A server error during streaming showed as "Stream resume produced
+  no new bytes, giving up".** chimera reports a mid-stream failure as a
+  `data: {"error": ...}` event. Upstream's stream reader ignored it,
+  treated the stream as dropped, and resumed from the last byte, which
+  returned nothing. The reader now ends on the event and shows the
+  server's message.
+- **Multi-turn chats were never consolidated into one chimera chat.**
+  `sidecar.ts` read upstream's conversation id from the request body
+  (`conversation_id` / `chat_id`), but the `b9119` webui sent no id at
+  all, so no `X-Chimera-Chat-Id` was ever sent and every turn created
+  a new chat row. Only the unit tests, which put the id in the body,
+  exercised the path. `b11429` sends `X-Conversation-Id:
+  <conv>[::<model>]` on streaming requests; the interceptor now reads
+  that header and drops the model suffix, so a model switch does not
+  split the chat.
 - **A fresh clone failed to build: `src/lib/components/app/models/` was
   never committed.** The unanchored `models` / `models/` rules in
   `.gitignore`, meant for the root model symlink, also matched this
   vendored directory, so vite could not resolve `./models` in
-  `components/app/index.ts`. The rule is now `/models`, and the eight
-  files are restored from upstream `b9119`, unmodified.
+  `components/app/index.ts`. The rule is now `/models`.
 - **The loaded model was displayed as its full filesystem path, in two places
   at once.** chimera identifies a model by the absolute path it was loaded
   from (that is what `-m` was given); upstream's `parseModelId` assumes a
@@ -108,6 +135,30 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Default `MODEL` is `Qwen3-0.6B-Q8_0.gguf`** (was
+  Llama-3.2-1B-Instruct). The rebased webui sends its built-in browser
+  tools with every chat request. With tools present, llama.cpp
+  `b11429` rejects a plain-text Llama-3.2 reply as not matching its
+  `peg-native` output format, so the old default failed on ordinary
+  questions. Qwen3-0.6B returned both plain answers and tool calls.
+  Disabling the built-in tools by default was the alternative; it would
+  remove an upstream feature and add a vendored patch.
+- **Vendored webui rebased to llama.cpp `b11429`** (from `b9119`), the
+  ref chimera 0.6.0 pins. Upstream moved the UI to `tools/ui/` and
+  rewrote the root layout, stores and scroll model, so the patch set
+  was redone; `docs/upstream-rebase.md` § 3 has the new set and § 5
+  the updated procedure. Upstream now scrolls the document and sizes
+  its chrome by `100dvh`, so the status bar is `position: fixed` and
+  the sidebar and chat form subtract its height. The PWA plugin stays,
+  with its service worker disabled, because upstream imports its
+  virtual modules. The `parseModelId` and `katex-custom.scss` patches
+  are dropped: upstream now strips model paths itself and removed the
+  stylesheet.
+
+  The lockfile is seeded from upstream's. A fresh resolve pulled
+  `esrap` 2.4.0 under Svelte 5.56.1, which leaves the `?` of optional
+  parameters in compiled output, and the build failed on the first
+  `.svelte` file with one.
 - **Bundled chimera sidecar pinned to 0.6.0** (from 0.2.3), and
   `CHIMERA_VERSION` in the Makefile with it. No app code changed: every
   spawn flag still exists, and the routes the panels call plus the

@@ -6,6 +6,29 @@ Versions track [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Bundled chimera sidecar pinned to 0.7.0** (from 0.6.0), and
+  `CHIMERA_VERSION` in the Makefile with it. No app code changed: every
+  spawn flag still exists, and the routes the panels call plus the
+  `X-Chimera-Chat-Id` round-trip return the same shapes (README §
+  Sidecar binary). The sidecar always gets an explicit `--port`, so
+  chimera's new default port (9931) does not apply.
+- **Vendored webui rebased to llama.cpp `b11669`** (from `b11429`), the
+  ref chimera 0.7.0 pins. New from upstream: a models dialog (sidebar
+  "Models"), a reasoning control in the chat form, and mobile drawers.
+  Upstream's diff was merged rather than re-vendored, so the § 3
+  patches stayed in place. Only `SidebarNavigation.svelte` needed a
+  three-way merge, and it merged clean. Upstream's one `vite.config.ts`
+  change sits in the proxy block chimera-desktop removes.
+  `package.json` takes upstream's `@lucide/svelte` 1.46.0 and new
+  `vaul-svelte` dependency.
+- **README: Llama-3.2 still fails with the built-in tools at `b11669`.**
+  The rejection of plain-text replies noted for `b11429` reproduces, so
+  `Qwen3-0.6B-Q8_0.gguf` stays the default `MODEL`.
+- **`docs/upstream-rebase.md` § 5 describes merging upstream's diff**
+  as an alternative to re-vendoring when the change is small.
+
 ### Added
 
 - **LoRA panel (functional adapter hot-swap).** The right-rail LoRA

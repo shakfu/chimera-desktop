@@ -2,7 +2,7 @@
 
 A Tauri 2 desktop application that wraps [chimera](https://github.com/shakfu/chimera) — bundling the static `chimera` binary as a sidecar process and exposing chimera's full surface (LLM, audio, image, RAG, persistent chat history) through an integrated UI.
 
-The UI is a fork of [llama.cpp's `tools/ui/`](https://github.com/ggml-org/llama.cpp/tree/b11429/tools/ui) (pinned to `b11429`), grafted onto a thin Tauri Rust shell that owns the chimera sidecar lifecycle and a small runtime patch layer that:
+The UI is a fork of [llama.cpp's `tools/ui/`](https://github.com/ggml-org/llama.cpp/tree/b11669/tools/ui) (pinned to `b11669`), grafted onto a thin Tauri Rust shell that owns the chimera sidecar lifecycle and a small runtime patch layer that:
 - Rewrites the upstream UI's relative API calls (`./v1/...`, `./props`, ...) to the chimera sidecar's dynamic localhost port.
 - Routes chimera-bound requests through `@tauri-apps/plugin-http` (Rust's `reqwest`) so they bypass the webview's CORS / COEP enforcement.
 - Adds `X-Chimera-Chat-Id` round-trip on chat completions so multi-turn conversations consolidate into one persisted chat row instead of one row per request (closes the gap called out in [`chimera/docs/dev/webui.md`](https://github.com/shakfu/chimera/blob/main/docs/dev/webui.md) §5.6).
@@ -96,7 +96,7 @@ Override variables on the command line:
 - `make MODEL=/abs/path/Qwen3-4B-Q8_0.gguf run` — different model for one run.
 - `make AUDIO_MODEL=… IMAGE_MODEL=… RAG_MODEL=… RERANK_MODEL=… dev` — point the optional Audio / Image / RAG / Rerank panels at local models. Each route is enabled only when its file exists, so unset/missing ones simply stay off; `make help` prints the defaults (all under `models/`).
 - `make CHIMERA_BUILD=/path/to/chimera-cuda sidecar` — stage a non-default chimera build.
-- `make CHIMERA_VERSION=0.5.0 sidecar-release` — fetch a different release version.
+- `make CHIMERA_VERSION=0.6.0 sidecar-release` — fetch a different release version.
 - `make SD_EAGER_LOAD=1 dev` — pre-load the diffusion weights at startup so the Image panel's first generation skips the warmup (see [Image warmup](#image-warmup-sd_eager_load)).
 - `make TARGET_TRIPLE=x86_64-apple-darwin sidecar` — override the auto-detected host triple (rare; useful for cross-bundling experiments).
 
@@ -104,12 +104,12 @@ Override variables on the command line:
 
 The chimera sidecar is **not committed** to this repo. Two ways to stage it into `src-tauri/binaries/chimera-<TARGET_TRIPLE>`:
 
-- `make sidecar-release` — download the prebuilt, portable (OpenSSL-free) binary from the [chimera GitHub release](https://github.com/shakfu/chimera/releases) pinned by `CHIMERA_VERSION` (default `0.6.0`). Needs the `gh` CLI; no local chimera checkout. This is the recommended path and the one the distribution model targets.
+- `make sidecar-release` — download the prebuilt, portable (OpenSSL-free) binary from the [chimera GitHub release](https://github.com/shakfu/chimera/releases) pinned by `CHIMERA_VERSION` (default `0.7.0`). Needs the `gh` CLI; no local chimera checkout. This is the recommended path and the one the distribution model targets.
 - `make sidecar` — copy from a local build at `$CHIMERA_BUILD` (default `~/projects/personal/chimera/build/chimera`). Use this when iterating on chimera itself.
 
 Tauri's `bundle.externalBin` convention appends the host target triple to the configured base name (`binaries/chimera`), which is why the file on disk must include the suffix.
 
-**Minimum chimera version: 0.2.1.** chimera-desktop's graceful-shutdown path POSTs to `/v1/chimera/shutdown`, which first appeared in chimera 0.2.1. Against an older sidecar that endpoint 404s and shutdown falls through to SIGKILL (functional, but ungraceful). 0.6.0 is the verified-compatible release. Every spawn flag (`serve --host --port -m --persist-chats --enable-audio --enable-image --enable-rag --reranking --lora --sd-eager-load`) exists in its `serve --help`. Against the 0.6.0 binary, `/health`, `/props`, `/v1/models`, `/slots`, `/lora-adapters`, `/v1/chats`, `/v1/chimera/{info,db,shutdown}`, `POST /v1/vector_stores`, `POST /v1/images/generations` and the `X-Chimera-Chat-Id` chat-completion round-trip all returned the expected status and shape. `/v1/rerank` and `/v1/audio/transcriptions` were mounted but not exercised. See the [chimera CHANGELOG](https://github.com/shakfu/chimera/blob/main/CHANGELOG.md) for what changed between releases.
+**Minimum chimera version: 0.2.1.** chimera-desktop's graceful-shutdown path POSTs to `/v1/chimera/shutdown`, which first appeared in chimera 0.2.1. Against an older sidecar that endpoint 404s and shutdown falls through to SIGKILL (functional, but ungraceful). 0.7.0 is the verified-compatible release. Every spawn flag (`serve --host --port -m --persist-chats --enable-audio --enable-image --enable-rag --reranking --lora --sd-eager-load`) exists in its `serve --help`. Against the 0.7.0 binary, `/health`, `/props`, `/v1/models`, `/slots`, `/lora-adapters`, `/v1/chats*`, `/v1/chimera/{info,db,shutdown}`, `/v1/vector_stores*` (create, ingest, search, list, delete), `POST /v1/audio/transcriptions`, `POST /v1/images/generations` and the `X-Chimera-Chat-Id` chat-completion round-trip all returned the expected status and shape. `/v1/rerank` was not exercised (no reranker model). See the [chimera CHANGELOG](https://github.com/shakfu/chimera/blob/main/CHANGELOG.md) for what changed between releases.
 
 Per-platform builds would stage:
 - `chimera-aarch64-apple-darwin`
@@ -130,7 +130,7 @@ ln -s ~/projects/personal/cyllama/models models
 
 `/models` is gitignored — the symlink target is never tracked.
 
-The chat model defaults to `Qwen3-0.6B-Q8_0.gguf` (`MODEL`). The webui sends its built-in browser tools with every chat request. With tools present, llama.cpp `b11429` rejects a plain-text Llama-3.2 reply ("does not match the expected peg-native format"), so ordinary questions fail. Requests without tools work; to use Llama-3.2, disable the built-in tools in the chat form (untested in the app).
+The chat model defaults to `Qwen3-0.6B-Q8_0.gguf` (`MODEL`). The webui sends its built-in browser tools with every chat request. With tools present, llama.cpp `b11429` and `b11669` reject a plain-text Llama-3.2 reply ("does not match the expected peg-native format"), so ordinary questions fail. Requests without tools work; to use Llama-3.2, disable the built-in tools in the chat form (untested in the app).
 
 The optional right-rail panels are driven by their own models in the same directory, each enabled only when the file is present (defaults printed by `make help`, override with the matching make variable):
 
@@ -162,7 +162,7 @@ Getting Tauri 2 working on top of a heavily-configured upstream SvelteKit fork s
 
 ```
 Makefile              Wraps npm + cargo + tauri commands. `make help` lists targets.
-src/                  Vendored SvelteKit frontend (fork of llama.cpp/tools/ui @ b11429)
+src/                  Vendored SvelteKit frontend (fork of llama.cpp/tools/ui @ b11669)
   app.html, app.css     Upstream entry + global styles
   routes/
     +layout.svelte      Upstream root layout (patched: see docs/upstream-rebase.md §3.3)

@@ -16,7 +16,7 @@ Companion docs in the chimera repo:
 
 ## 1. Pin
 
-Current pin: `b11429`, matching chimera 0.6.0's `LLAMACPP_VERSION`.
+Current pin: `b11669`, matching chimera 0.7.0's `LLAMACPP_VERSION`.
 
 The pin is implicit: nothing checks that the vendored source matches it.
 
@@ -239,6 +239,16 @@ make tauri-build
 CHIMERA_DESKTOP_MODEL=$PWD/models/<model>.gguf ./src-tauri/target/release/chimera-desktop
 ```
 
+When upstream's change is small, merging its diff keeps the patches in
+place instead of re-applying them. This was done at `b11669`:
+
+```bash
+# Upstream trees at the old and new pins in $A and $B.
+# Files changed upstream that carry no patch: copy (or delete) from $B.
+# Patched files: three-way merge, then resolve by hand.
+git merge-file <file> "$A/<file>" "$B/<file>"
+```
+
 Run the release binary, not only `make dev`. Production serves the
 bundle from `tauri://localhost`, a non-special scheme, and bugs that
 depend on it (§ 3.7) do not reproduce in dev.
@@ -254,7 +264,7 @@ In rough order of "most likely to bite":
 
 2. **`/v1/chat/completions` request shape changes** — the
    X-Chimera-Chat-Id wiring in `sidecar.ts` keys on upstream's
-   conversation id. At `b11429` that is the `X-Conversation-Id` header
+   conversation id. At `b11429` and `b11669` that is the `X-Conversation-Id` header
    (`<conv>[::<model>]`), sent on streaming requests only. `b9119` sent
    no id at all, so the wiring never fired before this rebase. If
    upstream moves the id or the endpoint, follow it.
